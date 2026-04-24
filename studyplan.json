@@ -1,0 +1,60 @@
+{
+  "courses": {
+    "Introduction to Computer Science": {
+      "course_code": "11102",
+      "prerequisites": []
+    },
+    "Structured Programming": {
+      "course_code": "11103",
+      "prerequisites": ["Introduction to Computer Science"]
+    },
+    "Object Oriented Programming": {
+      "course_code": "11206",
+      "prerequisites": ["Structured Programming"]
+    },
+    "Data Structures and Introduction to Algorithms": {
+      "course_code": "11212",
+      "prerequisites": ["Object Oriented Programming"]
+    },
+    "Introduction to Data Science": {
+      "course_code": "14140",
+      "prerequisites": ["Introduction to Computer Science"]
+    },
+    "Data Engineering": {
+      "course_code": "14260",
+      "prerequisites": ["Introduction to Data Science"]
+    },
+    "High Performance Computing for Big Data": {
+      "course_code": "14362",
+      "prerequisites": ["Data Engineering"]
+    },
+    "Artificial Intelligence": {
+      "course_code": "14330",
+      "prerequisites": ["Data Structures and Introduction to Algorithms"]
+    },
+    "Natural Language Processing": {
+      "course_code": "14351",
+      "prerequisites": ["Artificial Intelligence"]
+    },
+    "Data Mining": {
+      "course_code": "14465",
+      "prerequisites": ["High Performance Computing for Big Data"]
+    },
+    "Data Visualization": {
+      "course_code": "14364",
+      "prerequisites": ["High Performance Computing for Big Data"]
+    },
+    "Business Intelligence": {
+      "course_code": "14466",
+      "prerequisites": ["Data Visualization"]
+    },
+    "Database Systems": {
+      "course_code": "11323",
+      "prerequisites": ["Data Structures and Introduction to Algorithms"]
+    },
+    "Algorithms Design and Analysis": {
+      "course_code": "11313",
+      "prerequisites": ["Data Structures and Introduction to Algorithms"]
+    }
+  }
+}
