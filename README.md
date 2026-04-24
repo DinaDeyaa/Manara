@@ -1,76 +1,77 @@
 # Manara
 
-Manara is an AI-powered academic guidance system designed specifically for PSUT students.  
-It helps students study with clarity by identifying their weaknesses and guiding them through a personalized learning path.
+Manara is an AI-powered academic guidance system designed for PSUT students.  
+It helps students identify weaknesses and follow a personalized learning path.
 
 ---
 
 ## Project Overview
 
-Manara was built to solve a common problem among students:  
-not knowing where to start, what to focus on, or how to improve effectively.
-
-Instead of giving generic recommendations, Manara analyzes student performance through a diagnostic exam and identifies weak areas at the subtopic level. Based on this, it generates a structured and personalized learning path.
+Manara helps students move from confusion to clarity by analyzing their understanding and focusing only on what they actually need to improve.
 
 ---
 
-## Key Features
+## Backend (Core System Logic)
 
-- Diagnostic exams tailored to the target course  
-- Weakness detection at subtopic level (from prerequisite courses)  
-- Personalized learning paths based on actual gaps  
-- AI-generated exercises focused on weak areas  
-- Step-by-step explanations for better understanding  
-- Progress tracking through mini quizzes  
-- Course-specific question banks  
-- Chat-based academic assistant using real course material  
+- Main FastAPI server: api_server.py  
+- Diagnostic exam generation & grading: exam1.py  
+- Progress tracking & mini quizzes: track.py  
+- Question bank generation: qb.py  
+- Chat-based course assistant: askcourse.py  
+- Weak area detection: related_subtopic_analysis.py  
+- Student data handling: studentprofile.py  
+- Data preprocessing: datapreprocessing.py  
+- Knowledge graph: knowledgegraph.py  
+- RAG testing: check_rag.py  
+- Vector database checks: check_student_chroma.py  
+- PDF generation: pdf.py  
 
 ---
 
-## How It Works
+## Frontend
 
-1. The student selects a target course  
-2. Manara generates a diagnostic exam  
-3. Student answers are analyzed  
-4. Weak areas are mapped to prerequisite topics  
-5. A personalized learning path is generated  
-6. The student practices through exercises and tracks progress  
+- Main React application: App.jsx  
+
+---
+
+## Utilities
+
+- Generate student accounts: generate_student_accounts.py  
+
+---
+
+## Data Files
+
+- Course structure: studyplan.json  
+
+---
+
+## How the System Works
+
+1. Student selects a target course  
+2. Diagnostic exam is generated  
+3. Answers are analyzed  
+4. Weak areas are identified  
+5. Personalized learning path is created  
+6. Student practices and tracks progress  
 
 ---
 
 ## Tech Stack
 
-### Frontend
 - React  
-- Tailwind CSS  
-
-### Backend
-- Python (FastAPI)  
-
-### AI / Processing
-- LLM-based question generation  
-- Retrieval from course materials (RAG)
-
----
-
-## Project Structure
-
-- frontend/ → React user interface  
-- backend/ → API and system logic  
-- data/ → course materials and processed content  
+- FastAPI  
+- Python  
+- RAG  
 
 ---
 
 ## Academic Context
 
-This project is developed as a graduation project at  
-Princess Sumaya University for Technology (PSUT).
-
-Manara is designed specifically to align with PSUT’s curriculum and course structure.
+Graduation project — PSUT  
 
 ---
 
 ## Note
 
-This system is built for academic support purposes.  
-It is not a replacement for course instruction, but a tool to help students study more effectively and independently.
+Manara is designed to support student learning, not replace course instruction.
