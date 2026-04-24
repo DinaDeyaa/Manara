@@ -42,8 +42,7 @@ Manara helps students move from confusion to clarity by analyzing their understa
 
 ## Data Files
 
-- Course structure: studyplan.json  
-
+- Course structure: studyplan.json
 ---
 
 ## How the System Works
