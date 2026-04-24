@@ -13,36 +13,37 @@ Manara helps students move from confusion to clarity by analyzing their understa
 
 ## Backend (Core System Logic)
 
-- Main FastAPI server: api_server.py  
-- Diagnostic exam generation & grading: exam1.py  
-- Progress tracking & mini quizzes: track.py  
-- Question bank generation: qb.py  
-- Chat-based course assistant: askcourse.py  
-- Weak area detection: related_subtopic_analysis.py  
-- Student data handling: studentprofile.py  
-- Data preprocessing: datapreprocessing.py  
-- Knowledge graph: knowledgegraph.py  
-- RAG testing: check_rag.py  
-- Vector database checks: check_student_chroma.py  
-- PDF generation: pdf.py  
+- Main FastAPI server: [api_server.py](./api_server.py)  
+- Diagnostic exam generation & grading: [exam1.py](./exam1.py)  
+- Progress tracking & mini quizzes: [track.py](./track.py)  
+- Question bank generation: [qb.py](./qb.py)  
+- Chat-based course assistant: [askcourse.py](./askcourse.py)  
+- Weak area detection: [related_subtopic_analysis.py](./related_subtopic_analysis.py)  
+- Student data handling: [studentprofile.py](./studentprofile.py)  
+- Data preprocessing: [datapreprocessing.py](./datapreprocessing.py)  
+- Knowledge graph: [knowledgegraph.py](./knowledgegraph.py)  
+- RAG testing: [check_rag.py](./check_rag.py)  
+- Vector database checks: [check_student_chroma.py](./check_student_chroma.py)  
+- PDF generation: [pdf.py](./pdf.py)  
 
 ---
 
 ## Frontend
 
-- Main React application: App.jsx  
+- Main React application: [App.jsx](./App.jsx)  
 
 ---
 
 ## Utilities
 
-- Generate student accounts: generate_student_accounts.py  
+- Generate student accounts: [generate_student_accounts.py](./generate_student_accounts.py)  
 
 ---
 
 ## Data Files
 
-- Course structure: studyplan.json
+- Course structure: [studyplan.json](./studyplan.json)  
+
 ---
 
 ## How the System Works
