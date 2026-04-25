@@ -116,24 +116,6 @@ function StatusBox({ type = "info", text }) {
   return <div className={`rounded-2xl border px-4 py-3 text-sm ${color}`}>{text}</div>;
 }
 
-function MathText({ text, className = "" }) {
-  const fixed = (text || "")
-    .replace(/\\\(/g, "$")
-    .replace(/\\\)/g, "$")
-    .replace(/\\\[/g, "$$")
-    .replace(/\\\]/g, "$$");
-  return (
-    <div className={className}>
-      <ReactMarkdown
-        remarkPlugins={[remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-      >
-        {fixed}
-      </ReactMarkdown>
-    </div>
-  );
-}
-
 function LoginPage({ values, setValues, onLogin, loading, error }) {
   const [showPassword, setShowPassword] = useState(false);
 
@@ -332,8 +314,8 @@ function PhoneAndCoursesPage({
         <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
           <div className="mb-3 text-sm font-medium text-slate-700">Courses taken previously</div>
           <div className="max-h-[360px] space-y-2 overflow-auto">
-            {allCourses.map((course) => {
-              const checked = selectedCourses.includes(course);
+            {(allCourses || []).map((course) => {
+              const checked = selectedCourses?.includes(course);
               return (
                 <label
                   key={course}
@@ -540,7 +522,30 @@ function AccountPanel({ student, phone, setPhone, onSavePhone, phoneSaving, phon
   );
 }
 
-function HomePage({ targetCourses, selectedTargetCourse, setSelectedTargetCourse, onStart, loading }) {
+function HomePage({
+  targetCourses,
+  selectedTargetCourse,
+  setSelectedTargetCourse,
+  onStart,
+  loading,
+  diagnosticExam,
+  diagnosticAnswers,
+  setDiagnosticAnswers,
+  onSubmitDiagnostic
+}) {
+  // 🔥 SHOW DIAGNOSTIC HERE
+  if (diagnosticExam) {
+    return (
+      <DiagnosticPage
+        exam={diagnosticExam}
+        answers={diagnosticAnswers}
+        setAnswers={setDiagnosticAnswers}
+        onSubmit={onSubmitDiagnostic}
+        loading={loading}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <Card className="p-10 text-center">
@@ -563,15 +568,18 @@ function HomePage({ targetCourses, selectedTargetCourse, setSelectedTargetCourse
       <Card className="p-8">
         <SectionTitle
           title="Generate Learning Path"
-          subtitle="Manara creates your learning path by first giving you a short diagnostic exam based on concepts from courses you have already completed. Your results are then used to identify weak areas and build a personalized path for the target course."
+          subtitle="Manara creates your learning path by first giving you a short diagnostic exam based on concepts from courses you have already completed."
         />
 
         <div className="mt-8 max-w-xl">
-          <label className="mb-2 block text-sm font-medium text-slate-700">Select target course</label>
+          <label className="mb-2 block text-sm font-medium text-slate-700">
+            Select target course
+          </label>
+
           <select
             value={selectedTargetCourse}
             onChange={(e) => setSelectedTargetCourse(e.target.value)}
-            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
+            className="w-full rounded-2xl border px-4 py-3"
           >
             <option value="">Choose target course</option>
             {targetCourses.map((course) => (
@@ -581,16 +589,14 @@ function HomePage({ targetCourses, selectedTargetCourse, setSelectedTargetCourse
             ))}
           </select>
 
-          {selectedTargetCourse ? (
+          {selectedTargetCourse && (
             <button
               onClick={onStart}
-              disabled={loading}
-              className="mt-5 inline-flex items-center gap-2 rounded-full bg-slate-900 px-6 py-3 font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+              className="mt-5 bg-black text-white px-6 py-3 rounded-full"
             >
-              <PlayCircle size={18} />
               Start
             </button>
-          ) : null}
+          )}
         </div>
       </Card>
     </div>
@@ -658,18 +664,25 @@ function DiagnosticPage({ exam, answers, setAnswers, onSubmit, loading }) {
   );
 }
 
-function ResultPage({ result, onGeneratePath }) {
+function ResultPage({ result, onGeneratePath, onExit }) {
   return (
     <div className="space-y-6">
+
       <Card className="p-8">
-        <SectionTitle title="Diagnostic Result" subtitle="Correct answers are shown in green and wrong answers in red." />
+        <SectionTitle
+          title="Diagnostic Result"
+          subtitle="Correct answers are shown in green and wrong answers in red."
+        />
+
         <div className="mt-5 flex flex-wrap gap-4 text-sm">
           <div className="rounded-full bg-slate-900 px-4 py-2 font-semibold text-white">
             Score: {result?.score_percentage ?? 0}%
           </div>
+
           <div className="rounded-full bg-green-100 px-4 py-2 font-medium text-green-700">
             Correct: {result?.correct_count ?? 0}
           </div>
+
           <div className="rounded-full bg-red-100 px-4 py-2 font-medium text-red-700">
             Wrong: {result?.wrong_count ?? 0}
           </div>
@@ -678,19 +691,36 @@ function ResultPage({ result, onGeneratePath }) {
 
       {(result?.questions_review || []).map((row, index) => {
         const correct = row.is_correct;
+
         return (
           <Card
             key={row.question_id}
-            className={`p-6 border-2 ${correct ? "border-green-200 bg-green-50/40" : "border-red-200 bg-red-50/40"}`}
+            className={`p-6 border-2 ${
+              correct
+                ? "border-green-200 bg-green-50/40"
+                : "border-red-200 bg-red-50/40"
+            }`}
           >
             <div className="mb-3 flex items-center gap-2">
-              {correct ? <CheckCircle2 size={18} className="text-green-600" /> : <AlertCircle size={18} className="text-red-600" />}
-              <span className={`text-sm font-semibold ${correct ? "text-green-700" : "text-red-700"}`}>
+              {correct ? (
+                <CheckCircle2 size={18} className="text-green-600" />
+              ) : (
+                <AlertCircle size={18} className="text-red-600" />
+              )}
+
+              <span
+                className={`text-sm font-semibold ${
+                  correct ? "text-green-700" : "text-red-700"
+                }`}
+              >
                 Q{index + 1} · {correct ? "Correct" : "Wrong"}
               </span>
             </div>
 
-            <MathText text={row.question} className="text-base font-medium leading-7 text-slate-900" />
+            <MathText
+              text={row.question}
+              className="text-base font-medium leading-7 text-slate-900"
+            />
 
             <div className="mt-4 space-y-2">
               {["A", "B", "C", "D"].map((opt) => {
@@ -698,28 +728,41 @@ function ResultPage({ result, onGeneratePath }) {
                 const isStudentOpt = row.student_answer === opt;
 
                 let style = "border-slate-200 bg-white";
+
                 if (isCorrectOpt) style = "border-green-300 bg-green-100";
                 if (isStudentOpt && !isCorrectOpt) style = "border-red-300 bg-red-100";
 
                 return (
                   <div key={opt} className={`rounded-2xl border px-4 py-3 text-sm ${style}`}>
-                    <span className="font-semibold">{opt})</span> {row.options?.[opt]}
+                    <span className="font-semibold">{opt})</span>{" "}
+                    {row.options?.[opt]}
                   </div>
                 );
               })}
             </div>
 
             <div className="mt-4 text-sm text-slate-700">
-              <span className="font-semibold">Correct answer:</span> {row.correct_answer}
+              <span className="font-semibold">Correct answer:</span>{" "}
+              {row.correct_answer}
             </div>
+
             <div className="mt-2 text-sm leading-6 text-slate-600">
-              <span className="font-semibold">Explanation:</span> {row.explanation}
+              <span className="font-semibold">Explanation:</span>{" "}
+              {row.explanation}
             </div>
           </Card>
         );
       })}
 
-      <div className="flex justify-end">
+      {/* 🔥 BUTTONS AT BOTTOM */}
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onExit}
+          className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm text-slate-700 hover:bg-slate-100"
+        >
+          Exit
+        </button>
+
         <button
           onClick={onGeneratePath}
           className="rounded-full bg-slate-900 px-6 py-3 font-semibold text-white hover:bg-slate-800"
@@ -731,11 +774,23 @@ function ResultPage({ result, onGeneratePath }) {
   );
 }
 
-function LearningPathPage({ pathData, onExercises, onTrack, onDownloadPdf }) {
+function LearningPathPage({ pathData, onExercises, onTrack, onDownloadPdf, onExit }) {
   return (
     <div className="space-y-6">
+
+      {/* 🔥 EXIT BUTTON (TOP RIGHT) */}
+      <div className="flex justify-end">
+        <button
+          onClick={onExit}
+          className="rounded-full border border-slate-300 px-5 py-2 text-sm text-slate-700 hover:bg-slate-100"
+        >
+          ← Take New Diagnostic
+        </button>
+      </div>
+
       <Card className="p-8">
-        <SectionTitle title={`Learning Path — ${pathData?.target_course || ""}`}
+        <SectionTitle
+          title={`Learning Path — ${pathData?.target_course || ""}`}
           subtitle={`These are the weak subtopics identified for ${pathData?.target_course}.`}
         />
 
@@ -745,9 +800,17 @@ function LearningPathPage({ pathData, onExercises, onTrack, onDownloadPdf }) {
               <div className="text-lg font-semibold text-slate-900">
                 {step.step_number}. {step.source_course}
               </div>
-              <div className="mt-1 text-sm text-slate-500">Material: {step.source_material_pdf}</div>
-              <div className="mt-3 font-medium text-slate-800">{step.topic_name}</div>
-              <div className="mt-3 text-sm font-semibold text-slate-700">Weak subtopics:</div>
+              <div className="mt-1 text-sm text-slate-500">
+                Material: {step.source_material_pdf}
+              </div>
+              <div className="mt-3 font-medium text-slate-800">
+                {step.topic_name}
+              </div>
+
+              <div className="mt-3 text-sm font-semibold text-slate-700">
+                Weak subtopics:
+              </div>
+
               <ul className="mt-2 space-y-2 text-sm text-slate-700">
                 {step.weak_subtopics?.map((weak, idx) => (
                   <li key={idx} className="rounded-2xl bg-white px-4 py-3">
@@ -760,27 +823,27 @@ function LearningPathPage({ pathData, onExercises, onTrack, onDownloadPdf }) {
         </div>
 
         <div className="mt-8 flex flex-wrap gap-3">
-  <button
-    onClick={onDownloadPdf}
-    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-  >
-    <Download size={16} /> Download path as PDF
-  </button>
+          <button
+            onClick={onDownloadPdf}
+            className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Download path as PDF
+          </button>
 
-  <button
-    onClick={onExercises}
-    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-  >
-    Generate Exercises
-  </button>
+          <button
+            onClick={onExercises}
+            className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Generate Exercises
+          </button>
 
-  <button
-    onClick={onTrack}
-    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-  >
-    Track My Progress
-  </button>
-</div>
+          <button
+            onClick={onTrack}
+            className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Track My Progress
+          </button>
+        </div>
       </Card>
     </div>
   );
@@ -956,7 +1019,7 @@ function AskCoursePage({ allCourses, askCourseState, setAskCourseState, onAsk, l
           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
         >
           <option value="">Choose course</option>
-          {allCourses.map((c) => (
+          {(allCourses || []).map((c) => (
             <option key={c} value={c}>
               {c}
             </option>
@@ -1139,7 +1202,7 @@ function QuestionBanksPage({
           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
         >
           <option value="">Choose course</option>
-          {allCourses.map((c) => (
+          {(allCourses || []).map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
@@ -1266,7 +1329,7 @@ function CoursesPage({ allCourses, selectedCourses, setSelectedCourses, onSave, 
       </p>
 
       <div className="mt-4 space-y-2 max-h-[300px] overflow-auto">
-        {allCourses.map((course) => (
+        {(allCourses || []).map((course) => (
           <label key={course} className="flex justify-between border p-3 rounded-xl">
             {course}
             <input
@@ -1336,7 +1399,7 @@ function AccountPage({
         <div className="text-sm font-medium mb-3">Update your courses</div>
 
         <div className="max-h-[300px] overflow-auto space-y-2">
-          {allCourses.map((course) => (
+          {(allCourses || []).map((course) => (
             <label key={course} className="flex justify-between border p-3 rounded-xl">
               {course}
               <input
@@ -1510,6 +1573,64 @@ function AboutUsPage() {
   );
 }
 
+function formatResponse(text) {
+  if (!text) return "";
+
+  let fixed = text;
+
+  // 🔥 Wrap ANY standalone LaTeX into $$ ... $$
+  fixed = fixed.replace(
+    /(^|\n)(\\[a-zA-Z]+.*?)(?=\n|$)/g,
+    (match, start, expr) => {
+      return `${start}\n$$\n${expr.trim()}\n$$\n`;
+    }
+  );
+
+  // Fix \( \)
+  fixed = fixed.replace(/\\\((.*?)\\\)/g, (_, p1) => `$${p1}$`);
+
+  // Fix \[ \]
+  fixed = fixed.replace(/\\\[(.*?)\\\]/gs, (_, p1) => `\n$$\n${p1}\n$$\n`);
+
+  fixed = fixed.replace(/\\\s*$/gm, "");
+
+  // Clean
+  fixed = fixed.replace(/\n{3,}/g, "\n\n");
+
+  return fixed.trim();
+}
+
+function MathText({ text, className = "" }) {
+  return (
+    <div className={className}>
+      <ReactMarkdown
+        remarkPlugins={[remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={{
+          p: ({ children }) => (
+            <p className="mb-4 leading-relaxed">{children}</p>
+          ),
+
+          // 🔥 THIS FIXES BLOCK MATH SPACING
+          div: ({ children }) => (
+            <div className="my-4 overflow-x-auto">{children}</div>
+          ),
+
+          h3: ({ children }) => (
+            <h3 className="mt-6 mb-2 text-lg font-semibold">{children}</h3>
+          ),
+
+          ul: ({ children }) => (
+            <ul className="mb-4 ml-5 list-disc space-y-1">{children}</ul>
+          ),
+        }}
+      >
+        {formatResponse(text)}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 export default function App() {
   const [screen, setScreen] = useState("login");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -1539,7 +1660,7 @@ export default function App() {
   const [diagnosticExam, setDiagnosticExam] = useState(null);
   const [diagnosticAnswers, setDiagnosticAnswers] = useState({});
   const [diagnosticResult, setDiagnosticResult] = useState(null);
-  const [learningPath, setLearningPath] = useState(null);
+  const [learningPaths, setLearningPaths] = useState([]);
 
   const [exercisesLoading, setExercisesLoading] = useState(false);
   const [exerciseCounts, setExerciseCounts] = useState({});
@@ -1547,6 +1668,8 @@ export default function App() {
 
   const [termsLoading, setTermsLoading] = useState(false);
   const [selectedProgressCourse, setSelectedProgressCourse] = useState(null);
+
+  const [learningPath, setLearningPath] = useState(null);
 
   const [askLoading, setAskLoading] = useState(false);
   const [askCourseState, setAskCourseState] = useState({
@@ -1775,67 +1898,85 @@ const saveCourses = async () => {
   };
 
   const startDiagnostic = async () => {
-    try {
-      setDiagnosticLoading(true);
-      const exam = await api("/exam1/generate", {
-        method: "POST",
-        body: JSON.stringify({
-          student_id: student.student_id,
-          target_course: selectedTargetCourse,
-        }),
-      });
-      setDiagnosticExam(exam);
-      setDiagnosticAnswers({});
-      setScreen("diagnostic");
-    } catch (err) {
-      alert(err.message || "Could not generate diagnostic exam.");
-    } finally {
-      setDiagnosticLoading(false);
-    }
+  try {
+    setDiagnosticLoading(true);
+
+  const exam = await api("/exam1/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        student_id: student.student_id,
+        target_course: selectedTargetCourse,
+      }),
+    });
+
+    setDiagnosticExam(exam);
+    setDiagnosticAnswers({});
+
+  } catch (err) {
+    alert(err.message || "Could not generate diagnostic exam.");
+  } finally {
+    setDiagnosticLoading(false);
+  }
   };
 
   const submitDiagnostic = async () => {
-    try {
-      setDiagnosticLoading(true);
+  try {
+    
+    const total = diagnosticExam?.questions?.length || 0;
+    const answered = Object.keys(diagnosticAnswers).length;
 
-      const submitted_answers = Object.entries(diagnosticAnswers).map(([question_id, student_answer]) => ({
+    if (answered !== total) {
+      alert("Please answer all questions.");
+      return;
+    }
+
+    setDiagnosticLoading(true);
+
+    const submitted_answers = Object.entries(diagnosticAnswers).map(
+      ([question_id, student_answer]) => ({
         question_id,
         student_answer,
-      }));
+      })
+    );
 
-      const result = await api("/exam1/submit", {
-        method: "POST",
-        body: JSON.stringify({
-          student_id: student.student_id,
-          target_course: diagnosticExam.target_course,
-          submitted_answers,
-        }),
-      });
+    const result = await api("/exam1/submit", {
+      method: "POST",
+      body: JSON.stringify({
+        student_id: student.student_id,
+        target_course: diagnosticExam.target_course,
+        submitted_answers,
+      }),
+    });
 
-      setDiagnosticResult(result);
-      setScreen("result");
-    } catch (err) {
-      alert(err.message || "Could not submit diagnostic exam.");
-    } finally {
-      setDiagnosticLoading(false);
-    }
-  };
+    setDiagnosticResult(result);
+
+    setScreen("result");
+
+  } catch (err) {
+    alert(err.message || "Could not submit diagnostic exam.");
+  } finally {
+    setDiagnosticLoading(false);
+  }
+};
 
   const generatePath = async () => {
-    try {
-      const path = await api("/exam1/learning-path", {
-        method: "POST",
-        body: JSON.stringify({
-          student_id: student.student_id,
-          graded_result_payload: diagnosticResult,
-        }),
-      });
-      setLearningPath(path);
-      setScreen("app");
-      setSidebarTab("path");
-    } catch (err) {
-      alert(err.message || "Could not generate learning path.");
-    }
+  try {
+    const path = await api("/exam1/learning-path", {
+      method: "POST",
+      body: JSON.stringify({
+        student_id: student.student_id,
+        graded_result_payload: diagnosticResult,
+      }),
+    });
+
+    setLearningPath(path);
+
+    setSidebarTab("path");
+    setScreen("app");
+
+  } catch (err) {
+    alert(err.message || "Could not generate learning path.");
+  }
   };
 
   const generateExercises = async () => {
@@ -2080,14 +2221,17 @@ const renderAppBody = () => {
 }
 
 
-  if (sidebarTab === "path" && screen === "app" && learningPath) {
+  if (sidebarTab === "path" && learningPath) {
     return (
       <LearningPathPage
-        pathData={learningPath}
-        onExercises={() => {
-          setScreen("exercises");
-          setSidebarTab("path");
-        }}
+  pathData={learningPath}
+  onExit={() => {
+    setDiagnosticExam(null);
+    setDiagnosticResult(null);
+    setSelectedTargetCourse("");
+    setSidebarTab("home");
+    setScreen("app");
+  }}
         onTrack={async () => {
           try {
             await api("/track/start", {
@@ -2352,20 +2496,21 @@ const renderAppBody = () => {
     );
   }
 
-  if (screen === "diagnostic") {
-    return (
-      <DiagnosticPage
-        exam={diagnosticExam}
-        answers={diagnosticAnswers}
-        setAnswers={setDiagnosticAnswers}
-        onSubmit={submitDiagnostic}
-        loading={diagnosticLoading}
-      />
-    );
-  }
 
-  if (screen === "result") {
-    return <ResultPage result={diagnosticResult} onGeneratePath={generatePath} />;
+  if (diagnosticResult) {
+  return (
+    <ResultPage
+      result={diagnosticResult}
+      onGeneratePath={generatePath}
+      onExit={() => {
+        setDiagnosticExam(null);
+        setDiagnosticResult(null);
+        setSelectedTargetCourse("");
+        setSidebarTab("home");
+        setScreen("app");
+      }}
+    />
+  );
   }
 
   if (screen === "exercises") {
@@ -2430,6 +2575,28 @@ const renderAppBody = () => {
     );
   }
 
+  if (sidebarTab === "path" && !learningPath) {
+  return (
+    <Card className="p-8 text-center">
+      <SectionTitle
+        title="My Learning Path"
+        subtitle="You haven't generated a learning path yet."
+      />
+
+      <div className="mt-6 text-sm text-slate-500">
+        Go to "Generate Learning Path" to create your personalized path first.
+      </div>
+
+      <button
+        onClick={() => setSidebarTab("home")}
+        className="mt-6 rounded-full bg-slate-900 px-6 py-3 text-white"
+      >
+        Generate Now
+      </button>
+    </Card>
+  );
+  }
+
   return (
     <HomePage
       targetCourses={targetCourses}
@@ -2437,6 +2604,10 @@ const renderAppBody = () => {
       setSelectedTargetCourse={setSelectedTargetCourse}
       onStart={startDiagnostic}
       loading={diagnosticLoading}
+      diagnosticExam={diagnosticExam}
+      diagnosticAnswers={diagnosticAnswers}
+      setDiagnosticAnswers={setDiagnosticAnswers}
+      onSubmitDiagnostic={submitDiagnostic}
     />
   );
 };
@@ -2536,7 +2707,7 @@ const renderAppBody = () => {
     <div className="relative z-10 mx-auto min-h-screen max-w-[1600px] px-4 py-6 md:px-8">
       <AnimatePresence mode="wait">
         <motion.div
-          key={screen + sidebarTab}
+          key={`${screen}-${sidebarTab}-${learningPath ? "hasPath" : "noPath"}`}
           initial={{ opacity: 0, y: 16, scale: 0.99 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -12, scale: 0.99 }}
