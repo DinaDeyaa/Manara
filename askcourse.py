@@ -17,241 +17,212 @@ PROJECT_DIR = Path("/Users/dinaal-memah/Desktop/graduation project 2")
 COURSES_DIR = PROJECT_DIR / "courses"
 
 MODEL_NAME = "gpt-5.4-nano"
-MAX_COMPLETION_TOKENS = 500
+MAX_COMPLETION_TOKENS = 1200  # high but safe (no infinite looping)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY is not set in your environment.")
+    raise ValueError("OPENAI_API_KEY is not set.")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 embedding_function = embedding_functions.DefaultEmbeddingFunction()
 
 # =========================================================
-# SMART FILTER (FIX MAIN ISSUE)
+# LANGUAGE DETECTION
+# =========================================================
+
+def is_arabic(text: str) -> bool:
+    return bool(re.search(r"[\u0600-\u06FF]", text))
+
+# =========================================================
+# SMART FILTERS
 # =========================================================
 
 def is_small_talk(question: str) -> bool:
     q = question.lower().strip()
-
-    small_talk = [
-        "hi", "hello", "hey",
-        "thanks", "thank you",
-        "good morning", "good evening",
-        "how are you"
+    return q in [
+        "hi", "hello", "hey", "herro", "helo",
+        "what up", "what's up", "sup",
+        "thanks", "thank you"
     ]
-
-    return q in small_talk
 
 
 def is_irrelevant_question(question: str) -> bool:
-    """
-    Detect questions that are NOT course-related
-    """
     q = question.lower()
-
     non_academic = [
         "mansaf", "food", "recipe",
         "weather", "movie", "song",
-        "football", "match", "restaurant"
+        "football", "restaurant"
     ]
-
     return any(word in q for word in non_academic)
-
 
 # =========================================================
 # HELPERS
 # =========================================================
 
 def safe_slug(name: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9_]+", "_", str(name).strip().lower()).strip("_")
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", name.lower()).strip("_")
 
 
 def normalize_name(text: str) -> str:
-    cleaned = re.sub(r"[_\-]+", " ", str(text).strip().lower())
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned
+    return re.sub(r"\s+", " ", re.sub(r"[_\-]+", " ", text.lower())).strip()
 
 
-def get_course_folders(courses_dir: Path) -> list[Path]:
-    if not courses_dir.exists():
-        raise FileNotFoundError(f"Courses folder not found: {courses_dir}")
-    return sorted([p for p in courses_dir.iterdir() if p.is_dir()])
+def get_course_folders():
+    return [p for p in COURSES_DIR.iterdir() if p.is_dir()]
 
 
-def build_course_name_map() -> dict[str, str]:
-    mapping = {}
-    for course_dir in get_course_folders(COURSES_DIR):
-        mapping[normalize_name(course_dir.name)] = course_dir.name
-    return mapping
+def build_course_name_map():
+    return {normalize_name(p.name): p.name for p in get_course_folders()}
 
 
-def resolve_course_folder_name(user_text: str, course_name_map: dict[str, str]) -> str | None:
+def resolve_course_folder_name(user_text, course_map):
     normalized = normalize_name(user_text)
 
-    if normalized in course_name_map:
-        return course_name_map[normalized]
+    if normalized in course_map:
+        return course_map[normalized]
 
-    for norm_name, actual_name in course_name_map.items():
-        if normalized in norm_name or norm_name in normalized:
-            return actual_name
+    for k, v in course_map.items():
+        if normalized in k or k in normalized:
+            return v
 
     return None
 
 
-def get_course_folder(course_name: str) -> Path:
-    course_dir = COURSES_DIR / course_name
-    if not course_dir.exists():
-        raise FileNotFoundError(f"Course folder not found: {course_dir}")
-    return course_dir
+def get_course_folder(course_name):
+    return COURSES_DIR / course_name
 
 
-def get_chroma_client(course_dir: Path):
-    chroma_dir = course_dir / "outputs" / "chroma_db"
-    if not chroma_dir.exists():
-        raise FileNotFoundError(f"Chroma DB not found: {chroma_dir}")
-    return chromadb.PersistentClient(path=str(chroma_dir))
-
-
-def get_collection_if_exists(chroma_client, collection_name: str):
-    try:
-        return chroma_client.get_collection(
-            name=collection_name,
-            embedding_function=embedding_function
-        )
-    except Exception:
-        return None
-
-
-def extract_chapter_number(text: str) -> int:
-    match = re.search(r"ch(\d+)", text.lower())
-    return int(match.group(1)) if match else 999
-
-
-def deduplicate_sources(sources: list[dict]) -> list[dict]:
-    seen = set()
-    unique_sources = []
-
-    for s in sources:
-        if not isinstance(s, dict):
-            continue
-
-        key = s.get("relative_path") or s.get("file_name")
-        if not key or key in seen:
-            continue
-
-        seen.add(key)
-        unique_sources.append(s)
-
-    return sorted(
-        unique_sources,
-        key=lambda x: (
-            extract_chapter_number(x.get("chapter", "") or x.get("relative_path", "")),
-            str(x.get("relative_path", ""))
-        )
+def get_chroma_client(course_dir):
+    return chromadb.PersistentClient(
+        path=str(course_dir / "outputs" / "chroma_db")
     )
 
+
+def get_collection_if_exists(client, name):
+    try:
+        return client.get_collection(name=name, embedding_function=embedding_function)
+    except:
+        return None
 
 # =========================================================
 # RETRIEVAL
 # =========================================================
 
-def load_course_collections(course_name: str):
+def load_course_collections(course_name):
     course_dir = get_course_folder(course_name)
-    chroma_client = get_chroma_client(course_dir)
-
+    client = get_chroma_client(course_dir)
     slug = safe_slug(course_name)
 
     return {
-        "chunks": get_collection_if_exists(chroma_client, f"{slug}_chunks"),
-        "summaries": get_collection_if_exists(chroma_client, f"{slug}_summaries"),
-        "concepts": get_collection_if_exists(chroma_client, f"{slug}_concepts"),
-        "metadata": get_collection_if_exists(chroma_client, f"{slug}_metadata"),
+        "chunks": get_collection_if_exists(client, f"{slug}_chunks"),
+        "summaries": get_collection_if_exists(client, f"{slug}_summaries"),
+        "concepts": get_collection_if_exists(client, f"{slug}_concepts"),
     }
 
 
-def query_collection(collection, query: str, top_k: int):
-    if collection is None:
+def query_collection(collection, query, k):
+    if not collection:
         return [], []
 
-    results = collection.query(query_texts=[query], n_results=top_k)
-    return results.get("documents", [[]])[0], results.get("metadatas", [[]])[0]
+    res = collection.query(query_texts=[query], n_results=k)
+    return res.get("documents", [[]])[0], res.get("metadatas", [[]])[0]
 
 
-def retrieve_context(course_name: str, query: str):
-    collections = load_course_collections(course_name)
+def retrieve_context(course_name, query):
+    col = load_course_collections(course_name)
 
     return {
-        "chunks": query_collection(collections["chunks"], query, 5),
-        "summaries": query_collection(collections["summaries"], query, 2),
-        "concepts": query_collection(collections["concepts"], query, 3),
-        "metadata": query_collection(collections["metadata"], query, 2),
+        "chunks": query_collection(col["chunks"], query, 5),
+        "summaries": query_collection(col["summaries"], query, 2),
+        "concepts": query_collection(col["concepts"], query, 3),
     }
-
 
 # =========================================================
 # PROMPT
 # =========================================================
 
-def build_context_text(retrieved: dict) -> str:
+def build_context_text(retrieved):
     parts = []
 
     for key, (docs, metas) in retrieved.items():
         for doc, meta in zip(docs, metas):
             label = meta.get("relative_path", key)
-            parts.append(f"[{key.upper()} | {label}]\n{doc}")
+            parts.append(f"[{label}]\n{doc}")
 
     return "\n\n".join(parts)
 
 
-def build_prompt(course_name: str, question: str, context_text: str) -> str:
-    return f"""
-Answer ONLY using this material.
+def build_prompt(course_name, question, context, arabic):
+    lang_rule = "Answer in Arabic." if arabic else "Answer in English."
 
-If not found, say:
-"I could not find this in the provided course material."
+    return f"""
+You are a university teaching assistant.
+
+Rules:
+- {lang_rule}
+- Explain clearly (Definition → Idea → Example)
+- DO NOT repeat sections
+- DO NOT restart explanation
+- Use clean math formatting: $...$
+- Keep spacing readable
+- If partially relevant → answer anyway
+- Only say "not found" if NOTHING exists
 
 Material:
-{context_text}
+{context}
 
 Question:
 {question}
 """
 
+# =========================================================
+# CLEAN OUTPUT (CRITICAL FIX)
+# =========================================================
+
+def clean_answer(text: str) -> str:
+    # remove duplicated blocks
+    text = re.sub(r"(Sure!.*?)(\1)+", r"\1", text, flags=re.DOTALL)
+
+    # fix latex newlines
+    text = re.sub(r"\n\s*(?=\\)", " ", text)
+
+    # fix spacing
+    text = re.sub(r"\s{2,}", " ", text)
+
+    # fix smashed words
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+
+    return text.strip()
 
 # =========================================================
-# MAIN API
+# MAIN FUNCTION
 # =========================================================
 
-def ask_course_question(course_name: str, question: str) -> dict:
+def ask_course_question(course_name, question):
     try:
         question = question.strip()
-
         if not question:
-            return {"success": False, "message": "Empty question", "answer": "", "sources": []}
+            return {"success": False, "answer": "", "sources": []}
 
-        # ✅ SMALL TALK FIX
         if is_small_talk(question):
             return {
                 "success": True,
-                "message": "Small talk",
                 "answer": f"Hi! Ask me anything about {course_name} 👋",
-                "sources": [],
+                "sources": []
             }
 
-        # ✅ IRRELEVANT FIX
         if is_irrelevant_question(question):
             return {
                 "success": True,
-                "message": "Irrelevant",
                 "answer": "I could not find this in the provided course material.",
-                "sources": [],
+                "sources": []
             }
 
         course_map = build_course_name_map()
         resolved = resolve_course_folder_name(course_name, course_map)
 
         if not resolved:
-            return {"success": False, "message": "Course not found", "answer": "", "sources": []}
+            return {"success": False, "answer": "", "sources": []}
 
         retrieved = retrieve_context(resolved, question)
         context = build_context_text(retrieved)
@@ -260,10 +231,11 @@ def ask_course_question(course_name: str, question: str) -> dict:
             return {
                 "success": True,
                 "answer": "I could not find this in the provided course material.",
-                "sources": [],
+                "sources": []
             }
 
-        prompt = build_prompt(resolved, question, context)
+        arabic = is_arabic(question)
+        prompt = build_prompt(resolved, question, context, arabic)
 
         response = client.chat.completions.create(
             model=MODEL_NAME,
@@ -272,31 +244,33 @@ def ask_course_question(course_name: str, question: str) -> dict:
             max_completion_tokens=MAX_COMPLETION_TOKENS
         )
 
-        answer = response.choices[0].message.content.strip()
+        answer = clean_answer(response.choices[0].message.content)
 
         sources = []
         for _, metas in retrieved.values():
             sources.extend(metas)
 
-        sources = deduplicate_sources(sources)
-
-        if "I could not find this in the provided course material." in answer:
-            sources = []
+        seen = set()
+        unique = []
+        for s in sources:
+            key = s.get("relative_path")
+            if key and key not in seen:
+                seen.add(key)
+                unique.append(s)
 
         return {
             "success": True,
             "answer": answer,
-            "sources": sources,
+            "sources": unique
         }
 
     except Exception as e:
         return {
             "success": False,
-            "message": str(e),
             "answer": "",
             "sources": [],
+            "message": str(e)
         }
-
 
 # =========================================================
 # CLI
@@ -304,7 +278,7 @@ def ask_course_question(course_name: str, question: str) -> dict:
 
 def main():
     print("Courses:")
-    for c in get_course_folders(COURSES_DIR):
+    for c in get_course_folders():
         print("-", c.name)
 
     course = input("\nCourse: ")
