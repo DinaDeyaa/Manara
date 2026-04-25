@@ -1446,10 +1446,20 @@ function AboutUsPage() {
 
       {/* ABOUT MANARA */}
       <Card className="p-8">
-        <SectionTitle
-          title="About Manara"
-          subtitle="Built with care for the PSUT community."
-        />
+
+  {/* 🔥 LOGO */}
+  <div className="flex justify-center mb-4">
+    <img
+      src="/logo.png"
+      alt="Manara logo"
+      className="h-60 w-60 object-contain"
+    />
+  </div>
+
+  <SectionTitle
+    title="About Manara"
+    subtitle="Built with care for the PSUT community."
+  />
 
         <div className="mt-6 space-y-5 text-sm leading-7 text-slate-700">
           <p>
