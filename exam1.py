@@ -13,6 +13,8 @@ import chromadb
 from openai import OpenAI
 from chromadb.utils import embedding_functions
 
+import random
+
 
 # =========================================================
 # CONFIG
@@ -67,6 +69,51 @@ def normalize_question_text(text: str) -> str:
     text = re.sub(r"[^\w\s]", "", text)
     return text
 
+def extract_question_concept(question: str) -> str:
+    q = normalize_question_text(question)
+
+    concept_keywords = [
+        "data engineering",
+        "data engineer",
+        "data science",
+        "data scientist",
+        "supervised learning",
+        "unsupervised learning",
+        "reinforcement learning",
+        "label",
+        "target",
+        "feature",
+        "data pipeline",
+        "pipeline",
+        "data warehouse",
+        "data visualization",
+        "visualization",
+        "data modeling",
+        "machine learning",
+        "database",
+        "etl",
+        "cleansing",
+        "transformation",
+        "storage",
+    ]
+
+    found = [k for k in concept_keywords if k in q]
+    if found:
+        return " | ".join(sorted(found[:2]))
+
+    words = q.split()
+    return " ".join(words[:8])
+
+
+def is_too_similar(q1: str, q2: str, threshold: float = 0.55) -> bool:
+    w1 = set(normalize_question_text(q1).split())
+    w2 = set(normalize_question_text(q2).split())
+
+    if not w1 or not w2:
+        return False
+
+    overlap = len(w1 & w2) / max(min(len(w1), len(w2)), 1)
+    return overlap >= threshold
 
 def extract_json_block(text: str):
     match = re.search(r"\{.*\}|\[.*\]", text, re.DOTALL)
@@ -637,25 +684,45 @@ def generate_diagnostic_mcq(
     retrieved_target_text: str,
     difficulty: str,
     banned_questions: list[str] | None = None,
+    banned_concepts: list[str] | None = None,
 ) -> dict:
     banned_questions = banned_questions or []
+    banned_concepts = banned_concepts or []
 
     banned_block = ""
     if banned_questions:
         banned_preview = "\n".join(f"- {q}" for q in banned_questions[:200])
-        banned_block = f"""
+        banned_block += f"""
 
-DO NOT REPEAT any of these previous diagnostic questions:
+DO NOT REPEAT or reword these previous diagnostic questions:
 {banned_preview}
+"""
 
-If a new question is too similar in wording or meaning, do NOT use it.
+    if banned_concepts:
+        concept_preview = "\n".join(f"- {c}" for c in banned_concepts[:100])
+        banned_block += f"""
+
+DO NOT generate a question testing these already-used concepts:
+{concept_preview}
 """
 
     prompt = f"""
 You are generating a diagnostic multiple-choice question.
 
-IMPORTANT RULES:
+CRITICAL ANTI-REPETITION RULES:
 - Generate exactly 1 multiple-choice question.
+- The question must test a DIFFERENT idea from previous questions.
+- Do NOT ask another question with the same meaning using different wording.
+- Do NOT repeat the same concept such as:
+  - definition of data engineering
+  - responsibilities of data engineers
+  - data scientist vs data engineer comparison
+  - supervised learning label/target idea
+- If the previous concept is already used, choose another specific concept from the material.
+- Avoid generic wording like "which option best describes".
+- Make the question specific to the subtopic.
+
+CONTENT RULES:
 - This question is for a diagnostic exam before studying the target course.
 - The question MUST be based on the student's previously taken related subtopic.
 - Use ONLY the academically relevant relation between:
@@ -693,7 +760,7 @@ Target course retrieved material:
 {retrieved_target_text[:12000]}
 """
 
-    parsed = ask_llm_for_json(prompt, temperature=0.45)
+    parsed = ask_llm_for_json(prompt, temperature=0.65)
 
     if not isinstance(parsed, dict):
         raise ValueError("LLM did not return a valid JSON object.")
@@ -716,9 +783,13 @@ Target course retrieved material:
     if correct_answer not in {"A", "B", "C", "D"}:
         raise ValueError("Invalid correct answer returned.")
 
-    banned_normalized = {normalize_question_text(q) for q in banned_questions}
-    if normalize_question_text(question) in banned_normalized:
-        raise ValueError("Repeated diagnostic question detected.")
+    for old_q in banned_questions:
+        if is_too_similar(question, old_q):
+            raise ValueError("Semantically repeated diagnostic question detected.")
+
+    question_concept = extract_question_concept(question)
+    if question_concept in set(banned_concepts):
+        raise ValueError("Repeated diagnostic concept detected.")
 
     return {
         "question": question,
@@ -740,20 +811,38 @@ def build_diagnostic_exam_questions(
     previous_question_history: list[str] | None = None,
 ) -> list[dict]:
     previous_question_history = previous_question_history or []
+
     used_questions = {normalize_question_text(q) for q in previous_question_history}
+    used_concepts = {extract_question_concept(q) for q in previous_question_history}
+
     related_items = get_related_previous_subtopics(student_profile, target_course)
+
     if not related_items:
         raise ValueError("No related previous subtopics were found for this student and target course.")
 
-    difficulties = assign_diagnostic_difficulties(len(related_items))
-    question_rows = []
+    random.shuffle(related_items)
 
-    for idx, (item, difficulty) in enumerate(zip(related_items, difficulties), start=1):
+    difficulties = assign_diagnostic_difficulties(len(related_items))
+
+    question_rows = []
+    subtopic_counts = {}
+
+    for item, difficulty in zip(related_items, difficulties):
+        subtopic_key = (
+            normalize_name(item["source_course"]),
+            normalize_name(item["source_topic_name"]),
+            normalize_name(item["source_subtopic_name"]),
+        )
+
+        if subtopic_counts.get(subtopic_key, 0) >= 1:
+            continue
+
         retrieved = retrieve_target_course_material(
             target_course=target_course,
             topic_name=item["target_topic_name"],
             subtopic_name=item["source_subtopic_name"],
         )
+
         context_text = build_context_text(retrieved)
 
         if not context_text.strip():
@@ -761,6 +850,8 @@ def build_diagnostic_exam_questions(
 
         banned_questions = list(previous_question_history)
         banned_questions.extend(q["question"] for q in question_rows)
+
+        banned_concepts = list(used_concepts)
 
         try:
             generated = generate_diagnostic_mcq(
@@ -772,15 +863,33 @@ def build_diagnostic_exam_questions(
                 retrieved_target_text=context_text,
                 difficulty=difficulty,
                 banned_questions=banned_questions,
+                banned_concepts=banned_concepts,
             )
         except Exception as e:
             print(f"Skipped diagnostic item '{item['source_subtopic_name']}': {e}")
             continue
 
         normalized_q = normalize_question_text(generated["question"])
+        generated_concept = extract_question_concept(generated["question"])
+
         if normalized_q in used_questions:
             continue
+
+        if generated_concept in used_concepts:
+            continue
+
+        too_similar = False
+        for old_row in question_rows:
+            if is_too_similar(generated["question"], old_row["question"]):
+                too_similar = True
+                break
+
+        if too_similar:
+            continue
+
         used_questions.add(normalized_q)
+        used_concepts.add(generated_concept)
+        subtopic_counts[subtopic_key] = subtopic_counts.get(subtopic_key, 0) + 1
 
         question_rows.append({
             "question_id": f"q{len(question_rows) + 1}",
