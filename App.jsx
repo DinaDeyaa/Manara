@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Eye,
   EyeOff,
+  Activity,
   ShieldCheck,
   UserRound,
   Lock,
@@ -353,6 +354,112 @@ function PhoneAndCoursesPage({
   );
 }
 
+function DashboardPage({ student, learningPath, progressData, setSidebarTab }) {
+  const totalPaths = progressData?.length || 0;
+
+  const averageProgress = useMemo(() => {
+    if (!Array.isArray(progressData) || progressData.length === 0) return 0;
+
+    const sum = progressData.reduce((acc, item) => {
+      const total = item.learning_path_steps ?? item.weak_subtopics_count ?? 0;
+      const done = item.completed_steps ?? 0;
+      return acc + (total > 0 ? done / total : 0);
+    }, 0);
+
+    return Math.round((sum / progressData.length) * 100);
+  }, [progressData]);
+
+  return (
+    <div className="space-y-6">
+
+      {/* 🔥 QUICK ACTIONS */}
+      <Card className="p-8">
+        <div className="text-3xl font-semibold tracking-tight text-slate-900">
+          Quick Actions
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-3">
+
+          <button onClick={() => setSidebarTab("dashboard")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
+            <div className="font-semibold text-white">Dashboard</div>
+            <div className="mt-1 text-sm text-white/80">
+              Overview of your learning.
+            </div>
+          </button>
+
+          <button onClick={() => setSidebarTab("home")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
+            <div className="font-semibold text-white">Generate Learning Path</div>
+            <div className="mt-1 text-sm text-white/80">
+              Start a diagnostic exam.
+            </div>
+          </button>
+
+          <button onClick={() => setSidebarTab("path")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
+            <div className="font-semibold text-white">My Learning Path</div>
+            <div className="mt-1 text-sm text-white/80">
+              Continue your path.
+            </div>
+          </button>
+
+          <button onClick={() => setSidebarTab("ask")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
+            <div className="font-semibold text-white">Ask Course</div>
+            <div className="mt-1 text-sm text-white/80">
+              Ask from course material.
+            </div>
+          </button>
+
+          <button onClick={() => setSidebarTab("progress")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
+            <div className="font-semibold text-white">View Progress</div>
+            <div className="mt-1 text-sm text-white/80">
+              Track completed subtopics.
+            </div>
+          </button>
+
+          <button onClick={() => setSidebarTab("banks")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
+            <div className="font-semibold text-white">Question Banks</div>
+            <div className="mt-1 text-sm text-white/80">
+              Practice questions by chapter.
+            </div>
+          </button>
+
+        </div>
+      </Card>
+
+      {/* 🔽 OVERVIEW */}
+      <Card className="p-8">
+        <SectionTitle
+          title="Dashboard"
+          subtitle="Here is a quick overview of your Manara learning journey."
+        />
+
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
+          <div className="rounded-3xl border bg-slate-50 p-5">
+            <div className="text-sm text-slate-500">Learning Paths</div>
+            <div className="mt-2 text-3xl font-semibold text-slate-900">
+              {totalPaths}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border bg-slate-50 p-5">
+            <div className="text-sm text-slate-500">Average Progress</div>
+            <div className="mt-2 text-3xl font-semibold text-slate-900">
+              {averageProgress}%
+            </div>
+          </div>
+
+          <div className="rounded-3xl border bg-slate-50 p-5">
+            <div className="text-sm text-slate-500">Current Path</div>
+            <div className="mt-2 text-lg font-semibold text-slate-900">
+              {learningPath?.target_course || "None yet"}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+    </div>
+  );
+}
+
 function Sidebar({
   open,
   setOpen,
@@ -364,12 +471,13 @@ function Sidebar({
   onNavigate,
 }) {
   const items = [
-    { key: "home", label: "Generate Learning Path", icon: ClipboardList },
-    { key: "path", label: "My Learning Path", icon: Route },
-    { key: "ask", label: "Ask Course", icon: MessageSquare },
-    { key: "progress", label: "View Progress", icon: BarChart3 },
-    { key: "banks", label: "Question Banks", icon: BookOpen },
-  ];
+  { key: "dashboard", label: "Dashboard", icon: BarChart3 },
+  { key: "home", label: "Generate Learning Path", icon: ClipboardList },
+  { key: "path", label: "My Learning Path", icon: Route },
+  { key: "ask", label: "Ask Course", icon: MessageSquare },
+  { key: "progress", label: "View Progress", icon: Activity },
+  { key: "banks", label: "Question Banks", icon: BookOpen },
+];
 
   return (
     <>
@@ -1541,11 +1649,11 @@ function AboutUsPage() {
               Dina Deya'a Al-Mimeh
             </div>
             <div className="text-sm text-slate-500">
-              Data Science & AI — PSUT
+              Data Science & Artificial intelligence — PSUT
             </div>
 
             <p className="mt-3 text-sm text-slate-600">
-              Built both frontend and backend, focusing on creating a smooth and user-friendly experience.
+              Led the UI/UX design and developed both frontend and backend, building the system end-to-end and ensuring a smooth, user-friendly experience.
             </p>
           </div>
 
@@ -1557,22 +1665,19 @@ function AboutUsPage() {
             />
 
             <div className="mt-4 font-semibold text-slate-900">
-              Marah Al-Shrouf
+              Marah Abdelnaser Al-Shrouf
             </div>
             <div className="text-sm text-slate-500">
-              Data Science & AI — PSUT
+              Data Science & Artificial intelligence — PSUT
             </div>
 
             <p className="mt-3 text-sm text-slate-600">
-              Worked on both frontend and backend, contributing to system logic and structure.
+              Contributed to frontend and backend development, supporting system logic, structure, and implementation while assisting in building and refining core features.
             </p>
           </div>
         </div>
 
         <div className="mt-8 text-center text-sm text-slate-600 max-w-2xl mx-auto space-y-2">
-  <p className="font-medium">
-    We’re not just teammates — we’ve been best friends since childhood.
-  </p>
 
   <p>
     Manara carries pieces of our own journey — every confusion, every late night, every moment we didn’t know where to start — with the hope that it makes someone else’s path a little clearer.
@@ -1644,7 +1749,7 @@ function MathText({ text, className = "" }) {
 export default function App() {
   const [screen, setScreen] = useState("login");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState("home");
+  const [sidebarTab, setSidebarTab] = useState("dashboard");
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -2140,9 +2245,13 @@ const saveCourses = async () => {
 };
 
   useEffect(() => {
-    if (screen === "app" && sidebarTab === "progress" && student?.student_id) {
-      loadProgress();
-    }
+    if (
+  screen === "app" &&
+  (sidebarTab === "progress" || sidebarTab === "dashboard") &&
+  student?.student_id
+) {
+  loadProgress();
+}
   }, [screen, sidebarTab, student?.student_id]);
 
   useEffect(() => {
@@ -2208,6 +2317,18 @@ const saveCourses = async () => {
   };
 
 const renderAppBody = () => {
+
+
+  if (sidebarTab === "dashboard") {
+  return (
+    <DashboardPage
+      student={student}
+      learningPath={learningPath}
+      progressData={progressData}
+      setSidebarTab={setSidebarTab}
+    />
+  );
+}
 
   if (sidebarTab === "about") {
   return <AboutUsPage />;
