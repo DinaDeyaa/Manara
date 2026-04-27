@@ -33,6 +33,18 @@ import {
 
 const API_BASE = "http://localhost:8000/api";
 
+function formatErrorMessage(msg) {
+  if (!msg) return "";
+
+  msg = msg.replace(
+    /(.+?) is missing prerequisites: (.+)/i,
+    (_, course, prereq) =>
+      `You cannot take "${course}" because you must take "${prereq}" first (or in the same semester).`
+  );
+
+  return msg;
+}
+
 function jordanPhoneIsValid(phone) {
   if (!phone?.trim()) return true;
   const clean = phone.replace(/\s+/g, "");
@@ -40,28 +52,51 @@ function jordanPhoneIsValid(phone) {
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+      ...options,
+    });
+  } catch (err) {
+    throw new Error("Cannot connect to server. Is backend running?");
+  }
 
-  const text = await res.text();
   let data = {};
   try {
-    data = text ? JSON.parse(text) : {};
+    data = await res.json();
   } catch {
-    data = { success: false, message: text || "Invalid server response" };
+    data = {};
   }
 
   if (!res.ok) {
-    throw new Error(data?.message || "Request failed");
+    const msg =
+      data?.message ||
+      data?.error ||
+      data?.detail ||
+      "Server error.";
+
+    throw new Error(msg);
   }
 
   if (data.success === false) {
-    throw new Error(data.message || "Request failed");
+    let msg =
+      data?.message ||
+      data?.error ||
+      data?.detail ||
+      "Something went wrong.";
+
+    if (
+      msg.toLowerCase().includes("load failed") ||
+      msg.toLowerCase().includes("failed")
+    ) {
+      msg = "Server is not responding. Please try again.";
+    }
+
+    throw new Error(msg);
   }
 
   return data;
@@ -107,14 +142,21 @@ function SectionTitle({ title, subtitle }) {
 }
 
 function StatusBox({ type = "info", text }) {
-  const color =
-    type === "error"
-      ? "bg-red-50 text-red-700 border-red-200"
-      : type === "success"
-      ? "bg-green-50 text-green-700 border-green-200"
-      : "bg-slate-50 text-slate-700 border-slate-200";
-
-  return <div className={`rounded-2xl border px-4 py-3 text-sm ${color}`}>{text}</div>;
+  return (
+    <div
+      className={`flex items-start gap-2 rounded-2xl border px-4 py-3 text-sm ${
+        type === "error"
+          ? "bg-red-50 text-red-700 border-red-200"
+          : type === "success"
+          ? "bg-green-50 text-green-700 border-green-200"
+          : "bg-slate-50 text-slate-700 border-slate-200"
+      }`}
+    >
+      {type === "error" && <AlertCircle size={16} />}
+      {type === "success" && <CheckCircle2 size={16} />}
+      <span>{text}</span>
+    </div>
+  );
 }
 
 function LoginPage({ values, setValues, onLogin, loading, error }) {
@@ -1529,12 +1571,16 @@ function CoursesPage({ allCourses, selectedCourses, setSelectedCourses, onSave, 
       </div>
 
       <button
-        onClick={onSave}
-        disabled={saving}
-        className="mt-6 w-full bg-black text-white py-3 rounded-full disabled:opacity-50"
-      >
-        {saving ? "Saving..." : "Continue"}
-      </button>
+  onClick={() => {
+    setTimeout(() => {
+      onSave();
+    }, 0);
+  }}
+  disabled={saving}
+  className="mt-6 w-full bg-black text-white py-3 rounded-full disabled:opacity-50"
+>
+  {saving ? "Saving..." : "Continue"}
+</button>
     </Card>
 
     {error && <div className="mt-4"><StatusBox type="error" text={error} /></div>}
@@ -1667,12 +1713,16 @@ function AccountPage({
         </button>
 
         <button
-          onClick={onSave}
-          disabled={saving}
-          className="bg-black text-white px-5 py-3 rounded-full"
-        >
-          {saving ? "Saving..." : "Save Changes"}
-        </button>
+  onClick={() => {
+    setTimeout(() => {
+      onSave();   // ⚠️ NOT saveCourses directly
+    }, 0);
+  }}
+  disabled={saving}
+  className="bg-black text-white px-5 py-3 rounded-full"
+>
+  {saving ? "Saving..." : "Save Changes"}
+</button>
       </div>
     </div>
   );
@@ -2026,7 +2076,7 @@ if (unanswered) {
         setScreen("app");
       }
     } catch (err) {
-      setLoginError(err.message || "Login failed.");
+      setLoginError(formatErrorMessage(err.message) || "Login failed.");
     } finally {
       setLoginLoading(false);
     }
@@ -2092,7 +2142,7 @@ if (unanswered) {
 
     setScreen("courses-setup");
   } catch (err) {
-    setProfileError(err.message);
+    setProfileError(formatErrorMessage(err.message));
   } finally {
     setProfileLoading(false); 
   }
@@ -2101,26 +2151,33 @@ if (unanswered) {
 
 const saveCourses = async () => {
   setProfileError("");
+
   try {
-    if (!selectedCourses.length) {
+    // 🔥 FORCE latest state (important)
+    const latestCourses = [...selectedCourses];
+
+    if (!latestCourses.length) {
       setProfileError("Select at least one course.");
       return;
     }
 
     setProfileLoading(true);
 
+    console.log("SENDING COURSES:", latestCourses); // 🔍 debug
+
     await api("/student/profile-setup", {
       method: "POST",
       body: JSON.stringify({
         student_id: student.student_id,
         phone_number: phone,
-        courses_taken: selectedCourses,
+        courses_taken: latestCourses, // ✅ use latest copy
       }),
     });
 
     const res = await api(`/exam1/available-courses/${student.student_id}`);
     setTargetCourses(res.available_target_courses || []);
     setScreen("app");
+
   } catch (err) {
     setProfileError(err.message || "Could not save profile.");
   } finally {
@@ -2128,7 +2185,7 @@ const saveCourses = async () => {
   }
 };
 
-  const savePhoneFromAccount = async () => {
+const savePhoneFromAccount = async () => {
     try {
       setPhoneError("");
 
