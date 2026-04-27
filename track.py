@@ -76,7 +76,7 @@ def ask_llm(prompt: str) -> str:
                 "content": prompt,
             },
         ],
-        temperature=0.4,
+        temperature=0.7,
         max_completion_tokens=MAX_COMPLETION_TOKENS,
     )
     return response.choices[0].message.content.strip()
@@ -92,6 +92,23 @@ def extract_json_block(text: str):
     except Exception:
         return None
 
+def force_correct_answer_a(options: dict, correct_answer: str) -> tuple[dict, str]:
+    correct_answer = str(correct_answer).strip().upper()
+
+    if correct_answer not in {"A", "B", "C", "D"}:
+        return options, "A"
+
+    if correct_answer == "A":
+        return options, "A"
+
+    fixed_options = dict(options)
+
+    fixed_options["A"], fixed_options[correct_answer] = (
+        fixed_options[correct_answer],
+        fixed_options["A"],
+    )
+
+    return fixed_options, "A"
 
 def ask_llm_for_json(prompt: str, max_retries: int = 3):
     last_response = ""
@@ -469,11 +486,17 @@ COURSE MATERIAL:
         if not isinstance(options, dict) or set(options.keys()) != {"A", "B", "C", "D"}:
             raise ValueError("Invalid options format found.")
 
+        options, correct = force_correct_answer_a(options, correct)
+
         sig = question_signature(question_text)
+
+        # skip duplicates in same quiz
         if sig in seen_signatures:
-            raise ValueError("Duplicate question returned in same attempt.")
+            continue
+
+        # skip repeats from previous attempts (NO crash)
         if sig in previous_signatures:
-            raise ValueError("Repeated question from previous attempts detected.")
+            continue
 
         seen_signatures.add(sig)
 
@@ -485,10 +508,19 @@ COURSE MATERIAL:
                 "C": str(options["C"]).strip(),
                 "D": str(options["D"]).strip(),
             },
-            "correct_answer": correct,
+            "correct_answer": "A",
             "difficulty": difficulty,
             "explanation": explanation,
         })
+
+    if len(cleaned_questions) < QUESTIONS_PER_SUBTOPIC:
+        return generate_questions_for_subtopic(
+        course_name,
+        topic_name,
+        subtopic_name,
+        context_text,
+        previous_question_texts
+        )
 
     validate_difficulty_distribution(cleaned_questions)
     return cleaned_questions
