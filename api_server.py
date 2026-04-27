@@ -12,6 +12,9 @@ import csv
 
 from pdf import router as pdf_router
 
+import json
+from datetime import datetime
+
 # ---------------------------------------------------------
 # make sure Python can import your backend files
 # ---------------------------------------------------------
@@ -20,6 +23,7 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.append(str(PROJECT_DIR))
 
 STUDENT_ACCOUNTS_CSV = PROJECT_DIR / "data" / "students_accounts.csv"
+LEARNING_PATHS_CSV = PROJECT_DIR / "data" / "learning_paths.csv"
 
 # ---------------------------------------------------------
 # import your backend functions
@@ -261,6 +265,62 @@ def update_student(student_id: str, updates: dict[str, Any]) -> dict[str, Any] |
     save_students_to_csv(students)
     return student
 
+def load_learning_paths():
+    paths = []
+
+    if not LEARNING_PATHS_CSV.exists():
+        return paths
+
+    with open(LEARNING_PATHS_CSV, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            paths.append({
+                "student_id": row["student_id"],
+                "target_course": row["target_course"],
+                "path_data": json.loads(row["path_data"]),  # ✅ SAFE
+                "created_at": row["created_at"],
+            })
+
+    return paths
+
+
+def save_learning_paths(paths):
+    fieldnames = ["student_id", "target_course", "path_data", "created_at"]
+
+    with open(LEARNING_PATHS_CSV, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for p in paths:
+            writer.writerow({
+                "student_id": p["student_id"],
+                "target_course": p["target_course"],
+                "path_data": json.dumps(p["path_data"]),  # ✅ SAFE
+                "created_at": p["created_at"],
+            })
+
+def save_learning_path_internal(student_id: str, path_data: dict):
+    paths = load_learning_paths()
+
+    new_path = {
+        "student_id": student_id,
+        "target_course": path_data.get("target_course", ""),
+        "path_data": path_data,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+
+    # remove old path for same course
+    paths = [
+        p for p in paths
+        if not (
+            p["student_id"] == new_path["student_id"]
+            and p["target_course"] == new_path["target_course"]
+        )
+    ]
+
+    paths.append(new_path)
+    save_learning_paths(paths)
+
 # ---------------------------------------------------------
 # routes
 # ---------------------------------------------------------
@@ -429,6 +489,8 @@ def api_exam1_learning_path(payload: LearningPathRequest):
         graded_result_payload=payload.graded_result_payload,
         save_result=True,
     )
+
+    save_learning_path_internal(payload.student_id, result)
 
     delete_tracking_for_student_and_course(
         payload.student_id,
@@ -605,3 +667,65 @@ def api_track_submit(payload: TrackSubmitRequest):
             "message": str(e),
         }
 
+
+@app.post("/api/learning-path/save")
+def save_learning_path_api(payload: dict):
+    try:
+        paths = load_learning_paths()
+
+        new_path = {
+            "student_id": payload["student_id"],
+            "target_course": payload["path_data"].get("target_course", ""),
+            "path_data": payload["path_data"],
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+
+        # ❗ optional: remove old path for same course
+        paths = [
+            p for p in paths
+            if not (
+                p["student_id"] == new_path["student_id"]
+                and p["target_course"] == new_path["target_course"]
+            )
+        ]
+
+        paths.append(new_path)
+        save_learning_paths(paths)
+
+        return {"success": True, "message": "Path saved"}
+
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@app.get("/api/learning-path/student/{student_id}")
+def get_learning_paths(student_id: str):
+    try:
+        paths = load_learning_paths()
+
+        student_paths = [
+            p for p in paths if p["student_id"] == student_id
+        ]
+
+        return {
+            "success": True,
+            "paths": student_paths
+        }
+
+    except Exception as e:
+        return {"success": False, "message": str(e), "paths": []}
+
+@app.get("/api/reminders/students")
+def get_students_for_reminders():
+    # return ONLY students who need checking
+    return {
+        "students": [
+            {
+                "name": "Dina",
+                "phone": "+96279XXXXXXX",
+                "course": "Data Structures",
+                "progress": 40,
+                "last_active_days": 3
+            }
+        ]
+    }
