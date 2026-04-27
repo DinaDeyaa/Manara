@@ -124,6 +124,24 @@ def extract_json_block(text: str):
     except Exception:
         return None
 
+def force_correct_answer_a(options: dict, correct_answer: str) -> tuple[dict, str]:
+    correct_answer = str(correct_answer).strip().upper()
+
+    if correct_answer not in {"A", "B", "C", "D"}:
+        return options, "A"
+
+    if correct_answer == "A":
+        return options, "A"
+
+    fixed_options = dict(options)
+
+    # swap option A with the actual correct option
+    fixed_options["A"], fixed_options[correct_answer] = (
+        fixed_options[correct_answer],
+        fixed_options["A"],
+    )
+
+    return fixed_options, "A"
 
 def ask_llm(prompt: str, temperature: float = 0.4) -> str:
     response = client.chat.completions.create(
@@ -782,6 +800,8 @@ Target course retrieved material:
 
     if correct_answer not in {"A", "B", "C", "D"}:
         raise ValueError("Invalid correct answer returned.")
+
+    options, correct_answer = force_correct_answer_a(options, correct_answer)
 
     for old_q in banned_questions:
         if is_too_similar(question, old_q):
