@@ -6,6 +6,7 @@ import re
 import pandas as pd
 import chromadb
 from chromadb.utils import embedding_functions
+from datetime import datetime
 
 print("studentprofile.py loaded")
 
@@ -115,6 +116,7 @@ def load_existing_profiles() -> pd.DataFrame:
         "terms_accepted",
         "phone_number",
         "whatsapp_opt_in",
+        "last_active_at",
     ]
 
     if PROFILES_CSV.exists():
@@ -285,7 +287,27 @@ def row_to_profile_dict(row) -> dict:
         "terms_accepted": str_to_bool(row.get("terms_accepted", "")),
         "phone_number": str(row.get("phone_number", "")).strip(),
         "whatsapp_opt_in": str_to_bool(row.get("whatsapp_opt_in", "")),
+        "last_active_at": str(row.get("last_active_at", "")).strip(),  
     }
+
+def update_last_active(student_id: str):
+    profiles_df = load_existing_profiles()
+    row = get_profile_row(student_id, profiles_df)
+
+    if row is None:
+        profile = {
+            "student_id": student_id,
+            "student_name": "",
+            "courses_taken": [],
+            "terms_accepted": False,
+            "phone_number": "",
+            "whatsapp_opt_in": False,
+            "last_active_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    else:
+        profile = row_to_profile_dict(row)
+
+    save_student_profile(profile)
 
 
 # =========================================================
@@ -300,6 +322,7 @@ def save_student_profile(student_profile: dict):
         "terms_accepted": to_bool_str(student_profile.get("terms_accepted", False)),
         "phone_number": str(student_profile.get("phone_number", "")).strip(),
         "whatsapp_opt_in": to_bool_str(student_profile.get("whatsapp_opt_in", False)),
+        "last_active_at": student_profile.get("last_active_at", ""), 
     }
 
     new_df = pd.DataFrame([row])
@@ -395,6 +418,8 @@ def authenticate_student(student_id: str, password: str) -> dict:
     else:
         profile = row_to_profile_dict(existing_row)
 
+    update_last_active(student_row["student_id"])  
+
     return {
         "student_id": str(student_row["student_id"]).strip(),
         "student_name": str(student_row["student_name"]).strip(),
@@ -444,6 +469,8 @@ def accept_terms(student_id: str) -> dict:
     save_student_profile(profile)
     save_student_to_chroma(profile)
 
+    update_last_active(student_id)
+
     return profile
 
 
@@ -478,6 +505,8 @@ def update_phone_number(student_id: str, phone_number: str = "", whatsapp_opt_in
 
     save_student_profile(profile)
     save_student_to_chroma(profile)
+
+    update_last_active(student_id)
 
     return profile
 
@@ -531,10 +560,13 @@ def update_completed_courses(student_id: str, new_courses: list[str]) -> dict:
         "terms_accepted": terms_accepted,
         "phone_number": phone_number,
         "whatsapp_opt_in": whatsapp_opt_in,
+        "last_active_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
     save_student_profile(student_profile)
     save_student_to_chroma(student_profile)
+
+    update_last_active(student_id) 
 
     return student_profile
 
