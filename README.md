@@ -7,7 +7,7 @@ It helps students identify weaknesses and follow a personalized learning path.
 
 ## Project Overview
 
-Manara helps students move from confusion to clarity by analyzing their understanding and focusing only on what they actually need to improve.
+Manara helps students move from confusion to clarity by analyzing student performance and focusing only on weak areas.
 
 ---
 
@@ -52,18 +52,25 @@ Manara helps students move from confusion to clarity by analyzing their understa
 
 ---
 
-### 5. Output & Export
+### 5. Notifications System
+- WhatsApp reminders: [whats.py](./whats.py)  
+  → Sends automated WhatsApp reminders to students based on inactivity and progress using Twilio API and AI-generated messages.
+
+---
+
+### 6. Output & Export
 - PDF generation: [pdf.py](./pdf.py)  
   → Generates downloadable learning path reports.
 
 ---
 
-### 6. System Testing & Validation
+### 7. System Testing & Validation
 - RAG testing: [check_rag.py](./check_rag.py)  
   → Tests chatbot retrieval accuracy.
 
 - Vector database checks: [check_student_chroma.py](./check_student_chroma.py)  
   → Validates stored embeddings and vector database.
+
 ---
 
 ## Frontend
@@ -94,7 +101,8 @@ Manara helps students move from confusion to clarity by analyzing their understa
 3. Answers are analyzed  
 4. Weak areas are identified  
 5. Personalized learning path is created  
-6. Student practices and tracks progress  
+6. Student practices using quizzes and tracking system  
+7. Smart reminders are sent if the student becomes inactive  
 
 ---
 
@@ -104,43 +112,13 @@ Manara helps students move from confusion to clarity by analyzing their understa
 - FastAPI  
 - Python  
 - Retrieval-Augmented Generation (RAG)  
+- Twilio API (WhatsApp Integration)  
 
 ---
 
 ## Academic Context
 
-Graduation project — PSUT  
-
----
-
-## Note
-
-Manara is designed to support student learning, not replace course instruction.
----
-
-## How the System Works
-
-1. Student selects a target course  
-2. Diagnostic exam is generated  
-3. Answers are analyzed  
-4. Weak areas are identified  
-5. Personalized learning path is created  
-6. Student practices and tracks progress  
-
----
-
-## Tech Stack
-
-- React  
-- FastAPI  
-- Python  
-- RAG  
-
----
-
-## Academic Context
-
-Graduation project — PSUT  
+Graduation Project — PSUT  
 
 ---
 
