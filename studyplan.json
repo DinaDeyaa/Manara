@@ -2,59 +2,194 @@
   "courses": {
     "Introduction to Computer Science": {
       "course_code": "11102",
-      "prerequisites": []
-    },
-    "Structured Programming": {
-      "course_code": "11103",
-      "prerequisites": ["Introduction to Computer Science"]
-    },
-    "Object Oriented Programming": {
-      "course_code": "11206",
-      "prerequisites": ["Structured Programming"]
-    },
-    "Data Structures and Introduction to Algorithms": {
-      "course_code": "11212",
-      "prerequisites": ["Object Oriented Programming"]
+      "prerequisites": [],
+      "concurrent": []
     },
     "Introduction to Data Science": {
       "course_code": "14140",
-      "prerequisites": ["Introduction to Computer Science"]
+      "prerequisites": ["Introduction to Computer Science"],
+      "concurrent": []
     },
-    "Data Engineering": {
-      "course_code": "14260",
-      "prerequisites": ["Introduction to Data Science"]
+
+    "Structured Programming": {
+      "course_code": "11103",
+      "prerequisites": ["Introduction to Computer Science"],
+      "concurrent": ["Structured Programming Lab"]
     },
-    "High Performance Computing for Big Data": {
-      "course_code": "14362",
-      "prerequisites": ["Data Engineering"]
+    "Structured Programming Lab": {
+      "course_code": "11151",
+      "prerequisites": ["Structured Programming"],
+      "concurrent": ["Structured Programming"]
     },
-    "Artificial Intelligence": {
-      "course_code": "14330",
-      "prerequisites": ["Data Structures and Introduction to Algorithms"]
+
+    "Object Oriented Programming": {
+      "course_code": "11206",
+      "prerequisites": ["Structured Programming"],
+      "concurrent": ["Object Oriented Programming Lab"]
     },
-    "Natural Language Processing": {
-      "course_code": "14351",
-      "prerequisites": ["Artificial Intelligence"]
+    "Object Oriented Programming Lab": {
+      "course_code": "11253",
+      "prerequisites": ["Object Oriented Programming"],
+      "concurrent": ["Object Oriented Programming"]
     },
-    "Data Mining": {
-      "course_code": "14465",
-      "prerequisites": ["High Performance Computing for Big Data"]
+
+    "Data Structures and Introduction to Algorithms": {
+      "course_code": "11212",
+      "prerequisites": ["Object Oriented Programming"],
+      "concurrent": []
     },
-    "Data Visualization": {
-      "course_code": "14364",
-      "prerequisites": ["High Performance Computing for Big Data"]
-    },
-    "Business Intelligence": {
-      "course_code": "14466",
-      "prerequisites": ["Data Visualization"]
-    },
-    "Database Systems": {
-      "course_code": "11323",
-      "prerequisites": ["Data Structures and Introduction to Algorithms"]
-    },
+
     "Algorithms Design and Analysis": {
       "course_code": "11313",
-      "prerequisites": ["Data Structures and Introduction to Algorithms"]
+      "prerequisites": ["Data Structures and Introduction to Algorithms"],
+      "concurrent": []
+    },
+
+    "Database Systems": {
+      "course_code": "11323",
+      "prerequisites": ["Data Structures and Introduction to Algorithms"],
+      "concurrent": ["Database Systems Lab"]
+    },
+    "Database Systems Lab": {
+      "course_code": "11354",
+      "prerequisites": ["Database Systems"],
+      "concurrent": ["Database Systems"]
+    },
+
+    "Operating Systems": {
+      "course_code": "11335",
+      "prerequisites": ["Data Structures and Introduction to Algorithms"],
+      "concurrent": ["Operating Systems Lab"]
+    },
+    "Operating Systems Lab": {
+      "course_code": "11355",
+      "prerequisites": ["Operating Systems"],
+      "concurrent": ["Operating Systems"]
+    },
+
+    "Distributed Systems": {
+      "course_code": "11356",
+      "prerequisites": ["Operating Systems"],
+      "concurrent": []
+    },
+
+    "Computer and Society": {
+      "course_code": "11449",
+      "prerequisites": [],
+      "concurrent": []
+    },
+
+    "Information Systems Security": {
+      "course_code": "11464",
+      "prerequisites": ["Operating Systems"],
+      "concurrent": []
+    },
+
+    "Software Engineering": {
+      "course_code": "13477",
+      "prerequisites": ["Database Systems"],
+      "concurrent": []
+    },
+
+    "Data Engineering": {
+      "course_code": "14260",
+      "prerequisites": ["Introduction to Data Science"],
+      "concurrent": ["Data Engineering Lab"]
+    },
+    "Data Engineering Lab": {
+      "course_code": "14261",
+      "prerequisites": ["Data Engineering"],
+      "concurrent": ["Data Engineering"]
+    },
+
+    "Statistics and Probability for Data Science": {
+      "course_code": "14270",
+      "prerequisites": ["Statistical Methods"],
+      "concurrent": []
+    },
+
+    "Artificial Intelligence": {
+      "course_code": "14330",
+      "prerequisites": ["Data Structures and Introduction to Algorithms"],
+      "concurrent": []
+    },
+
+    "Computer Architecture for Machine Learning": {
+      "course_code": "14350",
+      "prerequisites": ["Artificial Intelligence"],
+      "concurrent": []
+    },
+
+    "Natural Language Processing": {
+      "course_code": "14351",
+      "prerequisites": ["Artificial Intelligence"],
+      "concurrent": []
+    },
+
+    "High Performance Computing for Big Data": {
+      "course_code": "14362",
+      "prerequisites": ["Data Engineering"],
+      "concurrent": []
+    },
+
+    "Data Visualization": {
+      "course_code": "14364",
+      "prerequisites": ["High Performance Computing for Big Data"],
+      "concurrent": []
+    },
+
+    "Pattern Recognition": {
+      "course_code": "14452",
+      "prerequisites": ["Artificial Intelligence"],
+      "concurrent": []
+    },
+
+    "Data Mining": {
+      "course_code": "14465",
+      "prerequisites": ["High Performance Computing for Big Data"],
+      "concurrent": []
+    },
+
+    "Business Intelligence": {
+      "course_code": "14466",
+      "prerequisites": ["Data Visualization"],
+      "concurrent": []
+    },
+
+    "Statistical Methods": {
+      "course_code": "20233",
+      "prerequisites": [],
+      "concurrent": []
+    },
+
+    "Calculus (1)": {
+      "course_code": "20132",
+      "prerequisites": [],
+      "concurrent": []
+    },
+
+    "Calculus (2)": {
+      "course_code": "20133",
+      "prerequisites": ["Calculus (1)"],
+      "concurrent": []
+    },
+
+    "Discrete Mathematics (1)": {
+      "course_code": "20134",
+      "prerequisites": [],
+      "concurrent": []
+    },
+
+    "Technical Writing and Communication Skills": {
+      "course_code": "20200",
+      "prerequisites": [],
+      "concurrent": []
+    },
+
+    "Linear Algebra": {
+      "course_code": "20234",
+      "prerequisites": ["Calculus (2)"],
+      "concurrent": []
     }
   }
 }
