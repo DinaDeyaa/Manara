@@ -209,6 +209,7 @@ def build_course_lookup(study_plan: dict) -> dict:
             "official_name": course_name,
             "course_code": course_info.get("course_code", ""),
             "prerequisites": course_info.get("prerequisites", []),
+            "concurrent": course_info.get("concurrent", [])  
         }
 
     return lookup
@@ -234,15 +235,28 @@ def validate_completed_courses(courses_taken: list[str], study_plan: dict) -> di
         course_info = lookup[norm_course]
         missing_prereqs = []
 
+        # ✅ 1. STRICT PREREQUISITES (no bypass with concurrent)
         for prereq in course_info["prerequisites"]:
             prereq_norm = normalize_course_name(prereq)
+
             if prereq_norm not in entered_set:
                 missing_prereqs.append(prereq)
 
+        # ✅ 2. STRICT LAB RULE (lab requires its main course)
+        for concurrent_course in course_info.get("concurrent", []):
+            concurrent_norm = normalize_course_name(concurrent_course)
+
+            # enforce: if lab is selected, its pair must also be selected
+            if concurrent_norm not in entered_set:
+                # only enforce if it's a mutual relationship (lab ↔ course)
+                if concurrent_norm in lookup:
+                    missing_prereqs.append(concurrent_course)
+
+        # ✅ 3. FINAL DECISION (after all checks)
         if missing_prereqs:
             violations.append({
                 "course": course_info["official_name"],
-                "missing_prerequisites": missing_prereqs,
+                "missing_prerequisites": list(set(missing_prereqs)),
             })
         else:
             valid_courses.append(course_info["official_name"])
@@ -516,29 +530,39 @@ def update_completed_courses(student_id: str, new_courses: list[str]) -> dict:
     study_plan = load_study_plan()
     profiles_df = load_existing_profiles()
 
-    student_match = accounts_df[accounts_df["student_id"].astype(str).str.strip() == str(student_id).strip()]
+    student_match = accounts_df[
+        accounts_df["student_id"].astype(str).str.strip() == str(student_id).strip()
+    ]
+
     if student_match.empty:
         raise ValidationError("Student not found.")
 
     student_row = student_match.iloc[0]
     existing_row = get_profile_row(student_id, profiles_df)
 
-    old_courses = []
     terms_accepted = False
     phone_number = ""
     whatsapp_opt_in = False
 
     if existing_row is not None:
         old_profile = row_to_profile_dict(existing_row)
-        old_courses = old_profile["courses_taken"]
         terms_accepted = old_profile["terms_accepted"]
         phone_number = old_profile["phone_number"]
         whatsapp_opt_in = old_profile["whatsapp_opt_in"]
 
-    cleaned_new_courses = [str(c).strip() for c in new_courses if str(c).strip()]
-    all_courses = merge_courses(old_courses, cleaned_new_courses)
+    # ✅ IMPORTANT: replace courses, do NOT merge with old courses
+    cleaned_new_courses = []
+    seen = set()
 
-    validation_result = validate_completed_courses(all_courses, study_plan)
+    for course in new_courses:
+        course = str(course).strip()
+        key = normalize_course_name(course)
+
+        if course and key not in seen:
+            seen.add(key)
+            cleaned_new_courses.append(course)
+
+    validation_result = validate_completed_courses(cleaned_new_courses, study_plan)
 
     if validation_result["unknown_courses"]:
         raise ValidationError(
@@ -556,7 +580,7 @@ def update_completed_courses(student_id: str, new_courses: list[str]) -> dict:
     student_profile = {
         "student_id": str(student_row["student_id"]).strip(),
         "student_name": str(student_row["student_name"]).strip(),
-        "courses_taken": all_courses,
+        "courses_taken": validation_result["valid_courses"],
         "terms_accepted": terms_accepted,
         "phone_number": phone_number,
         "whatsapp_opt_in": whatsapp_opt_in,
@@ -565,8 +589,6 @@ def update_completed_courses(student_id: str, new_courses: list[str]) -> dict:
 
     save_student_profile(student_profile)
     save_student_to_chroma(student_profile)
-
-    update_last_active(student_id) 
 
     return student_profile
 
