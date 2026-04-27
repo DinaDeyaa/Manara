@@ -66,11 +66,18 @@ def main():
     rows = []
 
     for sid in student_ids:
-        rows.append({
-            "student_id": sid,
-            "student_name": f"{fake.first_name()} {fake.last_name()}",
-            "password": generate_password(),
-        })
+        if sid in CUSTOM_STUDENTS:
+            rows.append({
+                "student_id": sid,
+               "student_name": CUSTOM_STUDENTS[sid]["student_name"],
+               "password": CUSTOM_STUDENTS[sid]["password"],
+            })
+        else:
+            rows.append({
+                "student_id": sid,
+                "student_name": f"{fake.first_name()} {fake.last_name()}",
+                "password": generate_password(),
+            })
 
     df = pd.DataFrame(rows, columns=["student_id", "student_name", "password"])
     df["student_id"] = df["student_id"].astype(str)
@@ -82,6 +89,16 @@ def main():
     print("\nSample:")
     print(df.head(10))
 
+# =========================================================
+# CUSTOM STUDENTS 
+# =========================================================
+
+CUSTOM_STUDENTS = {
+    "20220110": {"student_name": "Dina Al-Mimeh", "password": "dina123"},
+    "20220491": {"student_name": "Marah Al-Shrouf", "password": "marah123"},
+    "20240162": {"student_name": "Leen Deya'a Almimeh", "password": "leen123"},
+    "20220111": {"student_name": "Dr. Omar Alqawasmeh", "password": "omar123"},
+}
 
 if __name__ == "__main__":
     main()
