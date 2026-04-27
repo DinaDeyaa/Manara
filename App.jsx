@@ -357,6 +357,20 @@ function PhoneAndCoursesPage({
 function DashboardPage({ student, learningPath, progressData, setSidebarTab }) {
   const totalPaths = progressData?.length || 0;
 
+  // ✅ current course progress (separate hook)
+  const currentCourseProgress = useMemo(() => {
+    if (!Array.isArray(progressData) || progressData.length === 0) return 0;
+
+    const current = progressData[0];
+    if (!current) return 0;
+
+    const total = current.learning_path_steps ?? current.weak_subtopics_count ?? 0;
+    const done = current.completed_steps ?? 0;
+
+    return total > 0 ? Math.round((done / total) * 100) : 0;
+  }, [progressData]);
+
+  // ✅ overall progress
   const averageProgress = useMemo(() => {
     if (!Array.isArray(progressData) || progressData.length === 0) return 0;
 
@@ -381,38 +395,28 @@ function DashboardPage({ student, learningPath, progressData, setSidebarTab }) {
         <div className="mt-5 grid gap-4 md:grid-cols-3">
 
           <button onClick={() => setSidebarTab("home")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold text-white">Generate Learning Path</div>
-            <div className="mt-1 text-sm text-white/80">
-              Start a diagnostic exam.
-            </div>
+            <div className="font-semibold">Generate Learning Path</div>
+            <div className="mt-1 text-sm text-white/80">Start a diagnostic exam.</div>
           </button>
 
           <button onClick={() => setSidebarTab("path")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold text-white">My Learning Path</div>
-            <div className="mt-1 text-sm text-white/80">
-              Continue your path.
-            </div>
+            <div className="font-semibold">My Learning Path</div>
+            <div className="mt-1 text-sm text-white/80">Continue your path.</div>
           </button>
 
           <button onClick={() => setSidebarTab("ask")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold text-white">Ask Course</div>
-            <div className="mt-1 text-sm text-white/80">
-              Ask from course material.
-            </div>
+            <div className="font-semibold">Ask Course</div>
+            <div className="mt-1 text-sm text-white/80">Ask from course material.</div>
           </button>
 
           <button onClick={() => setSidebarTab("progress")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold text-white">View Progress</div>
-            <div className="mt-1 text-sm text-white/80">
-              Track completed subtopics.
-            </div>
+            <div className="font-semibold">View Progress</div>
+            <div className="mt-1 text-sm text-white/80">Track completed subtopics.</div>
           </button>
 
           <button onClick={() => setSidebarTab("banks")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold text-white">Question Banks</div>
-            <div className="mt-1 text-sm text-white/80">
-              Practice questions by chapter.
-            </div>
+            <div className="font-semibold">Question Banks</div>
+            <div className="mt-1 text-sm text-white/80">Practice questions by chapter.</div>
           </button>
 
         </div>
@@ -425,7 +429,9 @@ function DashboardPage({ student, learningPath, progressData, setSidebarTab }) {
           subtitle="Here is a quick overview of your Manara learning journey."
         />
 
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="mt-6 grid gap-4 md:grid-cols-4">
+
+          {/* paths */}
           <div className="rounded-3xl border bg-slate-50 p-5">
             <div className="text-sm text-slate-500">Learning Paths</div>
             <div className="mt-2 text-3xl font-semibold text-slate-900">
@@ -433,19 +439,30 @@ function DashboardPage({ student, learningPath, progressData, setSidebarTab }) {
             </div>
           </div>
 
+          {/* overall */}
           <div className="rounded-3xl border bg-slate-50 p-5">
-            <div className="text-sm text-slate-500">Average Progress</div>
+            <div className="text-sm text-slate-500">Overall Progress</div>
             <div className="mt-2 text-3xl font-semibold text-slate-900">
               {averageProgress}%
             </div>
           </div>
 
+          {/* current */}
+          <div className="rounded-3xl border bg-slate-50 p-5">
+            <div className="text-sm text-slate-500">Current Course Progress</div>
+            <div className="mt-2 text-3xl font-semibold text-slate-900">
+              {currentCourseProgress}%
+            </div>
+          </div>
+
+          {/* current path */}
           <div className="rounded-3xl border bg-slate-50 p-5">
             <div className="text-sm text-slate-500">Current Path</div>
             <div className="mt-2 text-lg font-semibold text-slate-900">
               {learningPath?.target_course || "None yet"}
             </div>
           </div>
+
         </div>
       </Card>
 
@@ -1542,9 +1559,9 @@ function AccountPage({
   return (
     <div className="space-y-6">
       <Card className="p-8">
-        <SectionTitle title="Account Settings" />
+        <SectionTitle title="My Account" />
 
-        <div className="mt-4 text-sm text-slate-600">
+        <div className="mt-4 text-base text-slate-600">
           <div><b>Name:</b> {student?.student_name}</div>
           <div><b>ID:</b> {student?.student_id}</div>
         </div>
@@ -1570,14 +1587,32 @@ function AccountPage({
   </label>
 </Card>
 
-      {/* COURSES */}
-      <Card className="p-6">
-        <div className="text-sm font-medium mb-3">Update your courses</div>
+  {/* COURSES */}
+<Card className="p-6">
+  <div className="text-base font-semibold mb-4 text-slate-900">
+    Update your courses
+  </div>
 
-        <div className="max-h-[300px] overflow-auto space-y-2">
-          {(allCourses || []).map((course) => (
-            <label key={course} className="flex justify-between border p-3 rounded-xl">
-              {course}
+  {(() => {
+    const sorted = [...(allCourses || [])].sort((a, b) =>
+      a.localeCompare(b)
+    );
+
+    const mid = Math.ceil(sorted.length / 2);
+    const col1 = sorted.slice(0, mid);
+    const col2 = sorted.slice(mid);
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        
+        {/* COLUMN 1 */}
+        <div className="space-y-3">
+          {col1.map((course) => (
+            <label
+              key={course}
+              className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              <span>{course}</span>
               <input
                 type="checkbox"
                 checked={selectedCourses.includes(course)}
@@ -1592,7 +1627,34 @@ function AccountPage({
             </label>
           ))}
         </div>
-      </Card>
+
+        {/* COLUMN 2 */}
+        <div className="space-y-3">
+          {col2.map((course) => (
+            <label
+              key={course}
+              className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              <span>{course}</span>
+              <input
+                type="checkbox"
+                checked={selectedCourses.includes(course)}
+                onChange={() =>
+                  setSelectedCourses((prev) =>
+                    prev.includes(course)
+                      ? prev.filter((c) => c !== course)
+                      : [...prev, course]
+                  )
+                }
+              />
+            </label>
+          ))}
+        </div>
+
+      </div>
+    );
+  })()}
+</Card>
 
       {error && <StatusBox type="error" text={error} />}
 
