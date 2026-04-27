@@ -36,7 +36,7 @@ const API_BASE = "http://localhost:8000/api";
 function jordanPhoneIsValid(phone) {
   if (!phone?.trim()) return true;
   const clean = phone.replace(/\s+/g, "");
-  return /^(?:\+9627\d{8}|07\d{8})$/.test(clean);
+  return /^(?:\+9627[789]\d{7}|07[789]\d{7})$/.test(clean);
 }
 
 async function api(path, options = {}) {
@@ -379,13 +379,6 @@ function DashboardPage({ student, learningPath, progressData, setSidebarTab }) {
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-3">
-
-          <button onClick={() => setSidebarTab("dashboard")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold text-white">Dashboard</div>
-            <div className="mt-1 text-sm text-white/80">
-              Overview of your learning.
-            </div>
-          </button>
 
           <button onClick={() => setSidebarTab("home")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
             <div className="font-semibold text-white">Generate Learning Path</div>
@@ -882,14 +875,41 @@ function ResultPage({ result, onGeneratePath, onExit }) {
   );
 }
 
-function LearningPathPage({ pathData, onExercises, onTrack, onDownloadPdf, onExit }) {
+function LearningPathPage({
+  pathData,
+  onExercises,
+  onTrack,
+  onDownloadPdf,
+  onExit,
+}) {
+  // 🔥 safety check
+  if (!pathData || !pathData.learning_path) {
+    return (
+      <Card className="p-8 text-center">
+        <div className="text-lg text-slate-700">
+          No learning path found.
+        </div>
+
+        <button
+          onClick={onExit}
+          className="mt-5 rounded-full bg-slate-900 px-6 py-3 text-white"
+        >
+          Go Back
+        </button>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-6">
 
-      {/* 🔥 EXIT BUTTON (TOP RIGHT) */}
+      {/* EXIT */}
       <div className="flex justify-end">
         <button
-          onClick={onExit}
+          onClick={() => {
+            console.log("EXIT CLICKED");
+            onExit?.();
+          }}
           className="rounded-full border border-slate-300 px-5 py-2 text-sm text-slate-700 hover:bg-slate-100"
         >
           ← Take New Diagnostic
@@ -898,19 +918,25 @@ function LearningPathPage({ pathData, onExercises, onTrack, onDownloadPdf, onExi
 
       <Card className="p-8">
         <SectionTitle
-          title={`Learning Path — ${pathData?.target_course || ""}`}
-          subtitle={`These are the weak subtopics identified for ${pathData?.target_course}.`}
+          title={`Learning Path — ${pathData.target_course}`}
+          subtitle="These are the weak subtopics identified."
         />
 
+        {/* PATH */}
         <div className="mt-6 space-y-5">
-          {(pathData?.learning_path || []).map((step) => (
-            <div key={`${step.step_number}-${step.topic_name}`} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+          {pathData.learning_path.map((step) => (
+            <div
+              key={`${step.step_number}-${step.topic_name}-${step.source_course}`}
+              className="rounded-3xl border border-slate-200 bg-slate-50 p-5"
+            >
               <div className="text-lg font-semibold text-slate-900">
                 {step.step_number}. {step.source_course}
               </div>
+
               <div className="mt-1 text-sm text-slate-500">
-                Material: {step.source_material_pdf}
+                Material: {step.source_material_pdf || "N/A"}
               </div>
+
               <div className="mt-3 font-medium text-slate-800">
                 {step.topic_name}
               </div>
@@ -920,8 +946,11 @@ function LearningPathPage({ pathData, onExercises, onTrack, onDownloadPdf, onExi
               </div>
 
               <ul className="mt-2 space-y-2 text-sm text-slate-700">
-                {step.weak_subtopics?.map((weak, idx) => (
-                  <li key={idx} className="rounded-2xl bg-white px-4 py-3">
+                {(step.weak_subtopics || []).map((weak, idx) => (
+                  <li
+                    key={`${weak.subtopic_name}-${idx}`}
+                    className="rounded-2xl bg-white px-4 py-3"
+                  >
                     - {weak.subtopic_name}
                   </li>
                 ))}
@@ -930,27 +959,45 @@ function LearningPathPage({ pathData, onExercises, onTrack, onDownloadPdf, onExi
           ))}
         </div>
 
+        {/* ACTIONS */}
         <div className="mt-8 flex flex-wrap gap-3">
+
           <button
-            onClick={onDownloadPdf}
-            className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+            onClick={() => {
+              console.log("DOWNLOAD CLICKED");
+              onDownloadPdf?.();
+            }}
+            className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
           >
             Download path as PDF
           </button>
 
           <button
-            onClick={onExercises}
-            className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+            onClick={() => {
+              console.log("EXERCISES CLICKED");
+
+              if (!pathData?.learning_path?.length) {
+                alert("No subtopics available.");
+                return;
+              }
+
+              onExercises?.();
+            }}
+            className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
           >
             Generate Exercises
           </button>
 
           <button
-            onClick={onTrack}
-            className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+            onClick={() => {
+              console.log("TRACK CLICKED");
+              onTrack?.();
+            }}
+            className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
           >
             Track My Progress
           </button>
+
         </div>
       </Card>
     </div>
@@ -1396,7 +1443,7 @@ function QuestionBankCard({ item, index }) {
   );
 }
 
-function PhonePage({ phone, setPhone, error, saving, onContinue }) {
+function PhonePage({ phone, setPhone, error, saving, onContinue, optIn, setOptIn }) {
   return (
     <Card className="max-w-[500px] p-8">
       <SectionTitle title="Add your phone number" />
@@ -1412,11 +1459,20 @@ function PhonePage({ phone, setPhone, error, saving, onContinue }) {
         Used for optional WhatsApp reminders.
       </p>
 
+      <label className="flex items-center gap-2 mt-3 text-sm text-slate-600">
+  <input
+    type="checkbox"
+    checked={optIn}
+    onChange={(e) => setOptIn(e.target.checked)}
+  />
+  I agree to receive WhatsApp reminders
+</label>
+
       {error && <StatusBox type="error" text={error} />}
 
       <button
         onClick={onContinue}
-        disabled={saving}
+        disabled={saving || (optIn && !phone)}
         className="mt-6 w-full bg-black text-white py-3 rounded-full disabled:opacity-50"
       >
         {saving ? "Saving..." : "Continue"}
@@ -1480,6 +1536,8 @@ function AccountPage({
   saving,
   error,
   onBack,
+  optIn,          
+  setOptIn
 }) {
   return (
     <div className="space-y-6">
@@ -1500,7 +1558,17 @@ function AccountPage({
           onChange={(e) => setPhone(e.target.value)}
           className="w-full border rounded-xl px-4 py-3"
         />
-      </Card>
+
+      {/* ✅ ADD THIS */}
+  <label className="flex items-center gap-2 mt-3 text-sm text-slate-600">
+    <input
+      type="checkbox"
+      checked={optIn}
+      onChange={(e) => setOptIn(e.target.checked)}
+    />
+    I agree to receive WhatsApp reminders
+  </label>
+</Card>
 
       {/* COURSES */}
       <Card className="p-6">
@@ -1653,7 +1721,7 @@ function AboutUsPage() {
             </div>
 
             <p className="mt-3 text-sm text-slate-600">
-              Led the UI/UX design and developed both frontend and backend, building the system end-to-end and ensuring a smooth, user-friendly experience.
+              Worked on both frontend and backend development, contributing to the overall system design, implementation, integration, building and enhancing the platform’s core features.
             </p>
           </div>
 
@@ -1672,7 +1740,7 @@ function AboutUsPage() {
             </div>
 
             <p className="mt-3 text-sm text-slate-600">
-              Contributed to frontend and backend development, supporting system logic, structure, and implementation while assisting in building and refining core features.
+              Worked across frontend and backend development, supporting system architecture, development, and integration, while playing a key role in building and refining the system’s main functionalities.
             </p>
           </div>
         </div>
@@ -1786,6 +1854,8 @@ export default function App() {
 
   const [learningPath, setLearningPath] = useState(null);
 
+  const [optIn, setOptIn] = useState(false);
+
   const [askLoading, setAskLoading] = useState(false);
   const [askCourseState, setAskCourseState] = useState({
     course: "",
@@ -1881,6 +1951,7 @@ if (unanswered) {
       setPhone(res.student?.phone_number || "");
       setSelectedCourses(res.student?.courses_taken || []);
       setTermsAccepted(!!res.student?.terms_accepted);
+      setOptIn(!!res.student?.whatsapp_opt_in);
 
       if (!res.student?.terms_accepted) {
         setScreen("terms");
@@ -1935,6 +2006,12 @@ if (unanswered) {
   const continueFromPhone = async () => {
   setProfileError("");
   try {
+
+    if (optIn && !phone) {
+  setProfileError("Phone is required if you enable WhatsApp reminders.");
+  return;
+    }
+
     if (phone && !jordanPhoneIsValid(phone)) {
       setProfileError("Invalid phone.");
       return;
@@ -1943,11 +2020,12 @@ if (unanswered) {
     setProfileLoading(true); 
 
     await api("/student/phone", {
-      method: "POST",
-      body: JSON.stringify({
-        student_id: student.student_id,
-        phone_number: phone,
-      }),
+  method: "POST",
+  body: JSON.stringify({
+    student_id: student.student_id,
+    phone_number: phone,
+    whatsapp_opt_in: optIn
+  }),
     });
 
     setScreen("courses-setup");
@@ -1999,12 +2077,13 @@ const saveCourses = async () => {
 
       setPhoneSaving(true);
       await api("/student/phone", {
-        method: "POST",
-        body: JSON.stringify({
-          student_id: student.student_id,
-          phone_number: phone,
-        }),
-      });
+  method: "POST",
+  body: JSON.stringify({
+    student_id: student.student_id,
+    phone_number: phone,
+    whatsapp_opt_in: optIn
+  }),
+});
     } catch (err) {
       setPhoneError(err.message || "Could not save phone number.");
     } finally {
@@ -2314,9 +2393,49 @@ const saveCourses = async () => {
     setTrackingLoading(false);
     setSelectedProgressCourse(null);
     setTrackingDetails(null);
+    setOptIn(false);
   };
 
 const renderAppBody = () => {
+
+  console.log("SCREEN:", screen);
+  console.log("TAB:", sidebarTab);
+
+  if (screen === "exercises") {
+    return (
+      <ExercisesPage
+        pathData={learningPath}
+        exerciseCounts={exerciseCounts}
+        setExerciseCounts={setExerciseCounts}
+        onGenerate={generateExercises}
+        exercisesData={exercisesData}
+        loading={exercisesLoading}
+        onExit={() => {
+          setScreen("app");
+          setSidebarTab("path");
+        }}
+      />
+    );
+  }
+
+    if (screen === "account") {
+  return (
+    <AccountPage
+      student={student}
+      phone={phone}
+      setPhone={setPhone}
+      selectedCourses={selectedCourses}
+      setSelectedCourses={setSelectedCourses}
+      allCourses={allCourses}
+      saving={profileLoading}
+      error={profileError}
+      onSave={saveCourses}
+      onBack={() => setScreen("app")}
+      optIn={optIn}
+      setOptIn={setOptIn}
+    />
+  );
+}
 
 
   if (sidebarTab === "dashboard") {
@@ -2334,28 +2453,21 @@ const renderAppBody = () => {
   return <AboutUsPage />;
 }
 
-  if (screen === "account") {
-  return (
-    <AccountPage
-      student={student}
-      phone={phone}
-      setPhone={setPhone}
-      selectedCourses={selectedCourses}
-      setSelectedCourses={setSelectedCourses}
-      allCourses={allCourses}
-      saving={profileLoading}
-      error={profileError}
-      onSave={saveCourses}
-      onBack={() => setScreen("app")}
-    />
-  );
-}
-
-
   if (sidebarTab === "path" && learningPath) {
     return (
       <LearningPathPage
   pathData={learningPath}
+
+  onExercises={() => {
+
+    if (!learningPath) {
+  alert("No learning path found");
+  return;
+}
+
+    setScreen("exercises");
+  }}
+
   onExit={() => {
     setDiagnosticExam(null);
     setDiagnosticResult(null);
@@ -2364,22 +2476,23 @@ const renderAppBody = () => {
     setScreen("app");
   }}
         onTrack={async () => {
-          try {
-            await api("/track/start", {
-              method: "POST",
-              body: JSON.stringify({
-                student_id: student.student_id,
-                learning_path_payload: learningPath,
-              }),
-            });
+  try {
+    await api("/track/start", {
+      method: "POST",
+      body: JSON.stringify({
+        student_id: student.student_id,
+        learning_path_payload: learningPath,
+      }),
+    });
 
-            setSidebarTab("progress");
-            setScreen("app");
-            loadProgress();
-          } catch (err) {
-            alert(err.message || "Could not start tracking.");
-          }
-        }}
+    setSidebarTab("progress");
+    setScreen("app");
+
+    loadProgress();
+  } catch (err) {
+    alert(err.message || "Could not start tracking.");
+  }
+}}
         onDownloadPdf={async () => {
   try {
     const res = await fetch("http://localhost:8000/api/download-path-pdf", {
@@ -2524,46 +2637,103 @@ const renderAppBody = () => {
   }
 
   if (screen === "progress-details" && trackingResult) {
-    return (
+  return (
+    <div className="space-y-6">
+
       <Card className="p-8">
         <SectionTitle
           title="Mini Quiz Result"
-          subtitle={`Score: ${trackingResult.score}/${trackingResult.max_score}`}
+          subtitle="Correct answers are shown in green and wrong in red."
         />
 
-        <div className="mt-4 text-sm text-slate-700">
-          {trackingResult.passed
-            ? "You passed this subtopic and can continue."
-            : "You did not pass this subtopic. You must retry it."}
+        <div className="mt-5 flex gap-4 text-sm">
+          <div className="bg-slate-900 text-white px-4 py-2 rounded-full">
+            Score: {trackingResult.score}/{trackingResult.max_score}
+          </div>
         </div>
+      </Card>
 
-        <div className="mt-6 flex gap-3">
-          {!trackingResult.tracking_completed && (
-            <button
-              onClick={() => {
-                setTrackingResult(null);
-                startTrackingQuiz();
-              }}
-              className="rounded-full bg-slate-900 px-5 py-3 text-white"
-            >
-              {trackingResult.passed ? "Next Mini Quiz" : "Retry Quiz"}
-            </button>
-          )}
+      {(trackingResult.questions_review || []).map((row, index) => {
+        const correct = row.is_correct;
 
+        return (
+          <Card
+            key={index}
+            className={`p-6 border-2 ${
+              correct ? "border-green-200 bg-green-50/40"
+                      : "border-red-200 bg-red-50/40"
+            }`}
+          >
+            <div className="mb-3 flex items-center gap-2">
+              {correct ? (
+                <CheckCircle2 className="text-green-600" />
+              ) : (
+                <AlertCircle className="text-red-600" />
+              )}
+
+              <span className={correct ? "text-green-700" : "text-red-700"}>
+                Q{index + 1} · {correct ? "Correct" : "Wrong"}
+              </span>
+            </div>
+
+            <MathText text={row.question} />
+
+            <div className="mt-4 space-y-2">
+              {["A","B","C","D"].map((opt) => {
+                const isCorrect = row.correct_answer === opt;
+                const isUser = row.student_answer === opt;
+
+                let style = "bg-white border-slate-200";
+
+                if (isCorrect) style = "bg-green-100 border-green-300";
+                if (isUser && !isCorrect) style = "bg-red-100 border-red-300";
+
+                return (
+                  <div key={opt} className={`border rounded-xl px-3 py-2 ${style}`}>
+                    <b>{opt})</b> {row.options?.[opt]}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 text-sm">
+              <b>Correct answer:</b> {row.correct_answer}
+            </div>
+
+            <div className="mt-2 text-sm text-slate-600">
+              <b>Explanation:</b> {row.explanation}
+            </div>
+          </Card>
+        );
+      })}
+
+      <div className="flex gap-3">
+        {!trackingResult.tracking_completed && (
           <button
             onClick={() => {
               setTrackingResult(null);
-              setTrackingQuiz(null);
-              setSidebarTab("progress");
-              setScreen("app");
+              startTrackingQuiz();
             }}
-            className="rounded-full border border-slate-300 bg-white px-5 py-3 text-slate-700"
+            className="bg-slate-900 text-white px-5 py-3 rounded-full"
           >
-            Back to Progress
+            {trackingResult.passed ? "Next Quiz" : "Retry"}
           </button>
-        </div>
-      </Card>
-    );
+        )}
+
+        <button
+          onClick={() => {
+            setTrackingResult(null);
+            setSidebarTab("progress");
+            setScreen("app");
+          }}
+          className="border px-5 py-3 rounded-full"
+        >
+          Back
+        </button>
+      </div>
+
+    </div>
+  );
   }
 
   if (screen === "progress-details") {
@@ -2628,7 +2798,7 @@ const renderAppBody = () => {
   }
 
 
-  if (diagnosticResult) {
+  if (screen === "result" && diagnosticResult) {
   return (
     <ResultPage
       result={diagnosticResult}
@@ -2642,23 +2812,6 @@ const renderAppBody = () => {
       }}
     />
   );
-  }
-
-  if (screen === "exercises") {
-    return (
-      <ExercisesPage
-        pathData={learningPath}
-        exerciseCounts={exerciseCounts}
-        setExerciseCounts={setExerciseCounts}
-        onGenerate={generateExercises}
-        exercisesData={exercisesData}
-        loading={exercisesLoading}
-        onExit={() => {
-          setScreen("app");
-          setSidebarTab("path");
-        }}
-      />
-    );
   }
 
   if (sidebarTab === "ask") {
@@ -2771,6 +2924,8 @@ const renderAppBody = () => {
       error={profileError}
       saving={profileLoading}
       onContinue={continueFromPhone}
+      optIn={optIn}
+      setOptIn={setOptIn}
     />
   ) : screen === "courses-setup" ? (
     <CoursesPage
@@ -2793,10 +2948,6 @@ const renderAppBody = () => {
         onLogout={logout}
         onNavigate={() => {
           setScreen("app");
-          setTrackingQuiz(null);
-          setTrackingResult(null);
-          setTrackingAnswers({});
-          setTrackingLoading(false);
         }}
       />
 
@@ -2838,7 +2989,7 @@ const renderAppBody = () => {
     <div className="relative z-10 mx-auto min-h-screen max-w-[1600px] px-4 py-6 md:px-8">
       <AnimatePresence mode="wait">
         <motion.div
-          key={`${screen}-${sidebarTab}-${learningPath ? "hasPath" : "noPath"}`}
+          key={screen}
           initial={{ opacity: 0, y: 16, scale: 0.99 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -12, scale: 0.99 }}
