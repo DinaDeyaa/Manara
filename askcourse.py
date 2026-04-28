@@ -37,23 +37,34 @@ def is_arabic(text: str) -> bool:
 # SMART FILTERS
 # =========================================================
 
-def is_small_talk(question: str) -> bool:
-    q = question.lower().strip()
-    return q in [
-        "hi", "hello", "hey", "herro", "helo",
-        "what up", "what's up", "sup",
-        "thanks", "thank you"
-    ]
+def classify_intent(question: str):
+    prompt = f"""
+Classify this student message into ONE of these:
 
+1. small_talk
+2. academic
+3. irrelevant
 
-def is_irrelevant_question(question: str) -> bool:
-    q = question.lower()
-    non_academic = [
-        "mansaf", "food", "recipe",
-        "weather", "movie", "song",
-        "football", "restaurant"
-    ]
-    return any(word in q for word in non_academic)
+Message:
+{question}
+
+Answer ONLY one word.
+"""
+
+    res = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0
+    )
+
+    output = res.choices[0].message.content.strip().lower()
+
+    if "small" in output:
+        return "small_talk"
+    elif "irrelevant" in output:
+        return "irrelevant"
+    else:
+        return "academic"
 
 # =========================================================
 # HELPERS
@@ -204,20 +215,26 @@ def ask_course_question(course_name, question):
         if not question:
             return {"success": False, "answer": "", "sources": []}
 
-        if is_small_talk(question):
+        # ✅ intent
+        intent = classify_intent(question)
+
+        if intent == "small_talk":
+            arabic = is_arabic(question)
             return {
                 "success": True,
-                "answer": f"Hi! Ask me anything about {course_name} 👋",
+                "answer": "مرحبا! كيف أقدر أساعدك؟ 😊" if arabic
+                          else "Hi! How can I help you? 😊",
                 "sources": []
             }
 
-        if is_irrelevant_question(question):
+        if intent == "irrelevant":
             return {
                 "success": True,
-                "answer": "I could not find this in the provided course material.",
+                "answer": "I can only help with course-related questions.",
                 "sources": []
             }
 
+        # ✅ continue normal RAG flow
         course_map = build_course_name_map()
         resolved = resolve_course_folder_name(course_name, course_map)
 
