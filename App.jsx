@@ -29,6 +29,7 @@ import {
   PlayCircle,
   ClipboardList,
   Heart,
+  GraduationCap
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000/api";
@@ -396,7 +397,42 @@ function PhoneAndCoursesPage({
   );
 }
 
+function calculateStreak(dates) {
+  if (!dates?.length) return 0;
+
+  const normalize = (d) => {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  };
+
+  const uniqueDates = [...new Set(
+    dates.filter(Boolean).map(d => normalize(d).getTime())
+  )]
+    .map(t => new Date(t))
+    .sort((a, b) => b - a);
+
+  let streak = 0;
+  let today = normalize(new Date());
+
+  for (let i = 0; i < uniqueDates.length; i++) {
+    const diff = Math.round(
+      (today - uniqueDates[i]) / (1000 * 60 * 60 * 24)
+    );
+
+    if (diff === 0 || diff === 1) {
+      streak++;
+      today = uniqueDates[i];
+    } else {
+      break;
+    }
+  }
+
+  return streak;
+}
+
 function DashboardPage({ student, learningPath, progressData, setSidebarTab }) {
+  const streak = calculateStreak(progressData.map(p => p.last_activity_date));
   const coursesCompleted = student?.courses_taken?.length || 0;
 
   const totalTopics = (progressData || []).reduce((acc, item) => {
@@ -476,7 +512,9 @@ function DashboardPage({ student, learningPath, progressData, setSidebarTab }) {
               <BarChart3 size={28} />
             </div>
             <div className="text-sm font-semibold text-slate-500">Learning Streak</div>
-            <div className="mt-3 text-4xl font-bold text-[#071333]">7</div>
+            <div className="mt-3 text-4xl font-bold text-[#071333]">
+              {streak}
+            </div>
             <div className="mt-2 text-sm text-slate-400">Days in a row! 🔥</div>
           </div>
         </div>
@@ -1229,66 +1267,78 @@ function AskCoursePage({ allCourses, askCourseState, setAskCourseState, onAsk, l
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [askCourseState.chat, loading]);
 
+  const handleNewChat = () => {
+    setAskCourseState((prev) => ({
+      ...prev,
+      question: "",
+      chat: [],
+    }));
+  };
+
   return (
     <Card className="p-8">
 
       <SectionTitle
         title="Ask Course"
-        subtitle="Chat with Manara about a selected course. Answers will include sources from course material."
+        subtitle="Chat with Manara about a selected course. Answers include sources grouped by course."
       />
 
-      {/* DROPDOWN */}
-      <div className="mt-6 max-w-xl">
-        <select
-          value={askCourseState.course}
-          onChange={(e) =>
-            setAskCourseState({
-              course: e.target.value,
-              question: "",
-              chat: [],
-            })
-          }
-          className="w-full rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-[#0B1B3F]"
+      {/* 🔥 TOP BAR (FINAL FIX — TRUE FAR RIGHT) */}
+      <div className="mt-6 flex items-center w-full">
+
+        {/* LEFT: SELECT */}
+        <div className="flex-1">
+          <select
+            value={askCourseState.course}
+            onChange={(e) =>
+              setAskCourseState({
+                course: e.target.value,
+                question: "",
+                chat: [],
+              })
+            }
+            className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-[#0B1B3F]"
+          >
+            <option value="">Select course</option>
+            {(allCourses || []).map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* RIGHT: BUTTON (NOW FAR RIGHT) */}
+        <button
+          onClick={handleNewChat}
+          className="ml-4 rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 whitespace-nowrap"
         >
-          <option value="">Select course</option>
-          {(allCourses || []).map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
+          + Start a New Chat
+        </button>
       </div>
 
-      {/* CHAT SECTION */}
+      {/* CHAT */}
       {askCourseState.course && (
         <div className="mt-8 space-y-6">
 
           {/* CHAT BOX */}
           <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-
             <div className="space-y-6 max-h-[420px] overflow-auto pr-2">
 
               {(askCourseState.chat || []).map((msg, index) => (
                 <div key={index} className="space-y-4">
 
-                  {/* USER MESSAGE */}
+                  {/* USER */}
                   <div className="flex justify-end">
                     <div className="max-w-[70%] rounded-full bg-[#0B1B3F] px-5 py-3 text-sm text-white">
                       {msg.q}
                     </div>
                   </div>
 
-                  {/* BOT MESSAGE */}
+                  {/* BOT */}
                   <div className="flex items-start gap-4">
-
-                    {/* ROBOT */}
                     <div className="flex h-14 w-14 shrink-0 items-center justify-center">
-                      <img
-                        src="/robot.png"
-                        alt="Manara Bot"
-                        className="h-20 w-20 object-contain"
-                      />
+                      <img src="/robot.png" className="h-20 w-20 object-contain" />
                     </div>
 
-                    {/* MESSAGE */}
                     <div className="flex-1">
 
                       <div className="mb-2">
@@ -1305,20 +1355,29 @@ function AskCoursePage({ allCourses, askCourseState, setAskCourseState, onAsk, l
                           <MathText text={msg.a || "No response"} />
                         )}
 
-                        {/* SOURCES */}
                         {msg.sources?.length > 0 && (
                           <div className="mt-4">
                             <div className="mb-2 text-xs font-semibold text-slate-600">
                               Sources
                             </div>
 
-                            <div className="flex flex-wrap gap-2">
-                              {msg.sources.map((s, i) => (
-                                <div
-                                  key={i}
-                                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600"
-                                >
-                                  {s.file_name || s.relative_path || "Source"}
+                            <div className="space-y-2">
+                              {msg.sources.map((group, i) => (
+                                <div key={i} className="text-xs text-slate-700">
+                                  <div className="font-semibold">
+                                    {group.course}
+                                  </div>
+
+                                  <div className="flex flex-wrap gap-2 mt-1">
+                                    {group.chapters.map((ch, j) => (
+                                      <span
+                                        key={j}
+                                        className="rounded-full border border-slate-200 bg-white px-3 py-1"
+                                      >
+                                        {ch}
+                                      </span>
+                                    ))}
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -1337,7 +1396,6 @@ function AskCoursePage({ allCourses, askCourseState, setAskCourseState, onAsk, l
 
           {/* INPUT */}
           <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-3 shadow-sm">
-
             <input
               value={askCourseState.question}
               onChange={(e) =>
@@ -1365,7 +1423,6 @@ function AskCoursePage({ allCourses, askCourseState, setAskCourseState, onAsk, l
             >
               ➤
             </button>
-
           </div>
 
         </div>
@@ -1373,7 +1430,6 @@ function AskCoursePage({ allCourses, askCourseState, setAskCourseState, onAsk, l
     </Card>
   );
 }
-
 
 function ProgressPage({ progressData, onOpenCourse }) {
   return (
@@ -1410,7 +1466,7 @@ function ProgressPage({ progressData, onOpenCourse }) {
                     <div
                       key={i}
                       className={`h-4 w-4 rounded-full ${
-                        i < done ? "bg-slate-900" : "bg-slate-300"
+                        i < done ? "bg-[#f8b51b]" : "bg-slate-300"
                       }`}
                     />
                   ))}
@@ -1648,130 +1704,152 @@ function AccountPage({
   saving,
   error,
   onBack,
-  optIn,          
+  optIn,
   setOptIn
 }) {
+  const initials = student?.student_name
+    ?.split(" ")
+    ?.map((n) => n[0])
+    ?.join("")
+    ?.slice(0, 2)
+    ?.toUpperCase();
+
+  const sorted = [...(allCourses || [])].sort((a, b) =>
+    a.localeCompare(b)
+  );
+
+  const mid = Math.ceil(sorted.length / 2);
+  const col1 = sorted.slice(0, mid);
+  const col2 = sorted.slice(mid);
+
   return (
     <div className="space-y-6">
-      <Card className="p-8">
-        <SectionTitle title="My Account" />
 
-        <div className="mt-4 text-base text-slate-600">
-          <div><b>Name:</b> {student?.student_name}</div>
-          <div><b>ID:</b> {student?.student_id}</div>
+      {/* 🔥 PROFILE */}
+      <Card className="p-8 flex items-center gap-4">
+        <div className="h-16 w-16 rounded-full bg-yellow-100 flex items-center justify-center text-yellow-600 font-bold text-xl">
+          {initials || "ST"}
+        </div>
+
+        <div>
+          <div className="text-lg font-semibold text-slate-900">
+            {student?.student_name}
+          </div>
+          <div className="text-sm text-slate-500">
+            ID: {student?.student_id}
+          </div>
         </div>
       </Card>
 
-      {/* PHONE */}
+      {/* 📱 PHONE WITH ICON */}
       <Card className="p-6">
-        <div className="text-sm font-medium mb-2">Phone (optional)</div>
-        <input
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          className="w-full border rounded-xl px-4 py-3"
-        />
+        <div className="flex items-start gap-4">
 
-      {/* ✅ ADD THIS */}
-  <label className="flex items-center gap-2 mt-3 text-sm text-slate-600">
-    <input
-      type="checkbox"
-      checked={optIn}
-      onChange={(e) => setOptIn(e.target.checked)}
-    />
-    I agree to receive WhatsApp reminders
-  </label>
-</Card>
+          {/* ICON */}
+          <div className="h-12 w-12 rounded-xl bg-yellow-100 flex items-center justify-center">
+            <Phone className="text-yellow-500" size={20} />
+          </div>
 
-  {/* COURSES */}
-<Card className="p-6">
-  <div className="text-base font-semibold mb-4 text-slate-900">
-    Update your courses
-  </div>
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-slate-800 mb-2">
+              Phone Number (optional)
+            </div>
 
-  {(() => {
-    const sorted = [...(allCourses || [])].sort((a, b) =>
-      a.localeCompare(b)
-    );
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="07XXXXXXXX"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:ring-2 focus:ring-yellow-400"
+            />
 
-    const mid = Math.ceil(sorted.length / 2);
-    const col1 = sorted.slice(0, mid);
-    const col2 = sorted.slice(mid);
-
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        
-        {/* COLUMN 1 */}
-        <div className="space-y-3">
-          {col1.map((course) => (
-            <label
-              key={course}
-              className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 hover:bg-slate-50"
-            >
-              <span>{course}</span>
+            <label className="flex items-center gap-2 mt-4 text-sm text-slate-600">
               <input
                 type="checkbox"
-                checked={selectedCourses.includes(course)}
-                onChange={() =>
-                  setSelectedCourses((prev) =>
-                    prev.includes(course)
-                      ? prev.filter((c) => c !== course)
-                      : [...prev, course]
-                  )
-                }
+                checked={optIn}
+                onChange={(e) => setOptIn(e.target.checked)}
               />
+              I agree to receive WhatsApp reminders
             </label>
-          ))}
+          </div>
+        </div>
+      </Card>
+
+      {/* 🎓 COURSES WITH ICON */}
+      <Card className="p-6">
+        <div className="flex items-start gap-4 mb-5">
+
+          {/* ICON */}
+          <div className="h-12 w-12 rounded-xl bg-yellow-100 flex items-center justify-center">
+            <GraduationCap className="text-yellow-500" size={20} />
+          </div>
+
+          <div>
+            <div className="text-lg font-semibold text-slate-900">
+              Update your courses
+            </div>
+            <div className="text-sm text-slate-500">
+              Select all courses you have completed
+            </div>
+          </div>
         </div>
 
-        {/* COLUMN 2 */}
-        <div className="space-y-3">
-          {col2.map((course) => (
-            <label
-              key={course}
-              className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 hover:bg-slate-50"
-            >
-              <span>{course}</span>
-              <input
-                type="checkbox"
-                checked={selectedCourses.includes(course)}
-                onChange={() =>
-                  setSelectedCourses((prev) =>
-                    prev.includes(course)
-                      ? prev.filter((c) => c !== course)
-                      : [...prev, course]
-                  )
-                }
-              />
-            </label>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[col1, col2].map((col, idx) => (
+            <div key={idx} className="space-y-3">
+              {col.map((course) => {
+                const checked = selectedCourses.includes(course);
+
+                return (
+                  <label
+                    key={course}
+                    className={`flex items-center justify-between rounded-2xl px-4 py-3 text-sm transition cursor-pointer
+                      ${
+                        checked
+                          ? "bg-yellow-50 border border-yellow-300"
+                          : "bg-white border border-slate-200 hover:bg-slate-50"
+                      }`}
+                  >
+                    <span className="text-slate-700">{course}</span>
+
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setSelectedCourses((prev) =>
+                          checked
+                            ? prev.filter((c) => c !== course)
+                            : [...prev, course]
+                        )
+                      }
+                      className="accent-yellow-500"
+                    />
+                  </label>
+                );
+              })}
+            </div>
           ))}
         </div>
+      </Card>
 
-      </div>
-    );
-  })()}
-</Card>
-
+      {/* ERROR */}
       {error && <StatusBox type="error" text={error} />}
 
-      <div className="flex gap-3">
+      {/* 🔥 ACTIONS */}
+      <div className="flex justify-between items-center">
         <button
           onClick={onBack}
-          className="border px-5 py-3 rounded-full"
+          className="rounded-full border border-slate-300 px-5 py-3 text-sm text-slate-700 hover:bg-slate-100"
         >
           Back
         </button>
 
         <button
-  onClick={() => {
-    setTimeout(() => {
-      onSave();   // ⚠️ NOT saveCourses directly
-    }, 0);
-  }}
-  disabled={saving}
-  className="bg-black text-white px-5 py-3 rounded-full"
->
-  {saving ? "Saving..." : "Save Changes"}
-</button>
+          onClick={onSave}
+          disabled={saving}
+          className="rounded-full bg-[#f8b51b] px-6 py-3 font-semibold text-black hover:bg-yellow-400 disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save Changes"}
+        </button>
       </div>
     </div>
   );
@@ -2443,25 +2521,34 @@ const savePhoneFromAccount = async () => {
     return;
   }
 
-  if (!question) {
-    return;
-  }
+  if (!question) return;
 
   try {
     setAskLoading(true);
 
+    // ✅ add user message first
+    const updatedChat = [
+      ...(askCourseState.chat || []),
+      {
+        role: "user",
+        content: question,
+        q: question,
+        a: "",
+        sources: [],
+        loading: true,
+      },
+    ];
+
     setAskCourseState((prev) => ({
       ...prev,
       question: "",
-      chat: [
-        ...(prev.chat || []),
-        {
-          q: question,
-          a: "Thinking...",
-          sources: [],
-          loading: true,
-        },
-      ],
+      chat: updatedChat,
+    }));
+
+    // ✅ send history to backend
+    const history = updatedChat.map((msg) => ({
+      role: msg.role === "user" ? "user" : "assistant",
+      content: msg.role === "user" ? msg.q : msg.a,
     }));
 
     const res = await api("/ask-course", {
@@ -2469,37 +2556,36 @@ const savePhoneFromAccount = async () => {
       body: JSON.stringify({
         course_name: askCourseState.course,
         question,
+        history, // 🔥 IMPORTANT
       }),
     });
 
+    // ✅ update last message
     setAskCourseState((prev) => {
-      const updatedChat = [...(prev.chat || [])];
-      updatedChat[updatedChat.length - 1] = {
+      const newChat = [...prev.chat];
+      newChat[newChat.length - 1] = {
+        role: "assistant",
         q: question,
         a: res.answer || "No answer found.",
         sources: res.sources || [],
         loading: false,
       };
 
-      return {
-        ...prev,
-        chat: updatedChat,
-      };
+      return { ...prev, chat: newChat };
     });
+
   } catch (err) {
     setAskCourseState((prev) => {
-      const updatedChat = [...(prev.chat || [])];
-      updatedChat[updatedChat.length - 1] = {
+      const newChat = [...prev.chat];
+      newChat[newChat.length - 1] = {
+        role: "assistant",
         q: question,
         a: err.message || "Ask failed.",
         sources: [],
         loading: false,
       };
 
-      return {
-        ...prev,
-        chat: updatedChat,
-      };
+      return { ...prev, chat: newChat };
     });
   } finally {
     setAskLoading(false);
