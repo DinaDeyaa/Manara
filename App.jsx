@@ -397,120 +397,136 @@ function PhoneAndCoursesPage({
 }
 
 function DashboardPage({ student, learningPath, progressData, setSidebarTab }) {
-  const totalPaths = progressData?.length || 0;
+  const coursesCompleted = student?.courses_taken?.length || 0;
 
-  // ✅ current course progress (separate hook)
-  const currentCourseProgress = useMemo(() => {
-    if (!Array.isArray(progressData) || progressData.length === 0) return 0;
+  const totalTopics = (progressData || []).reduce((acc, item) => {
+    return acc + (item.learning_path_steps ?? item.weak_subtopics_count ?? 0);
+  }, 0);
 
-    const current = progressData[0];
-    if (!current) return 0;
+  const completedTopics = (progressData || []).reduce((acc, item) => {
+    return acc + (item.completed_steps ?? 0);
+  }, 0);
 
-    const total = current.learning_path_steps ?? current.weak_subtopics_count ?? 0;
-    const done = current.completed_steps ?? 0;
+  const quizzesTaken = (progressData || []).reduce(
+  (acc, item) => acc + (item.completed_steps || 0),
+  0
+);
 
-    return total > 0 ? Math.round((done / total) * 100) : 0;
-  }, [progressData]);
-
-  // ✅ overall progress
-  const averageProgress = useMemo(() => {
-    if (!Array.isArray(progressData) || progressData.length === 0) return 0;
-
-    const sum = progressData.reduce((acc, item) => {
-      const total = item.learning_path_steps ?? item.weak_subtopics_count ?? 0;
-      const done = item.completed_steps ?? 0;
-      return acc + (total > 0 ? done / total : 0);
-    }, 0);
-
-    return Math.round((sum / progressData.length) * 100);
-  }, [progressData]);
+  const currentCourse = learningPath?.target_course || "No active course yet";
+  const currentProgress =
+    totalTopics > 0 ? Math.round((completedTopics / totalTopics) * 100) : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="relative min-h-[calc(100vh-80px)] overflow-hidden rounded-[36px] bg-white/90 p-10 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
 
-      {/* 🔥 QUICK ACTIONS */}
-      <Card className="p-8">
-        <div className="text-3xl font-semibold tracking-tight text-slate-900">
-          Quick Actions
+      {/* soft road background */}
+      <div className="pointer-events-none absolute left-[-120px] bottom-[-50px] h-72 w-72 rounded-full border-[38px] border-slate-100 opacity-70" />
+
+      {/* greeting */}
+      <div className="relative z-10">
+        <h1 className="text-5xl font-bold tracking-tight text-[#071333]">
+          Hello, {student?.student_name || "Student"}! 👋
+        </h1>
+        <p className="mt-3 text-lg text-slate-500">
+          Ready to continue your learning journey?
+        </p>
+      </div>
+
+      {/* graduation image */}
+      <img
+        src="/graduate.png"
+        alt="Graduate student"
+        className="pointer-events-none absolute right-10 top-6 z-0 hidden h-[330px] object-contain lg:block"
+      />
+
+      {/* overview */}
+      <div className="relative z-10 mt-28">
+        <h2 className="mb-5 text-2xl font-bold text-[#071333]">Your Overview</h2>
+
+        <div className="grid gap-5 md:grid-cols-4">
+          <div className="rounded-[24px] border border-slate-100 bg-white p-6 shadow-[0_12px_35px_rgba(15,23,42,0.08)]">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+              <BookOpen size={28} />
+            </div>
+            <div className="text-sm font-semibold text-slate-500">Courses Completed</div>
+            <div className="mt-3 text-4xl font-bold text-[#071333]">{coursesCompleted}</div>
+            <div className="mt-2 text-sm text-slate-400">Great job!</div>
+          </div>
+
+          <div className="rounded-[24px] border border-slate-100 bg-white p-6 shadow-[0_12px_35px_rgba(15,23,42,0.08)]">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-yellow-50 text-yellow-500">
+              <Activity size={28} />
+            </div>
+            <div className="text-sm font-semibold text-slate-500">Topics Learned</div>
+            <div className="mt-3 text-4xl font-bold text-[#071333]">{completedTopics}</div>
+            <div className="mt-2 text-sm text-slate-400">Keep going!</div>
+          </div>
+
+          <div className="rounded-[24px] border border-slate-100 bg-white p-6 shadow-[0_12px_35px_rgba(15,23,42,0.08)]">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-yellow-50 text-yellow-500">
+              <CheckCircle2 size={28} />
+            </div>
+            <div className="text-sm font-semibold text-slate-500">Quizzes Taken</div>
+            <div className="mt-3 text-4xl font-bold text-[#071333]">{quizzesTaken}</div>
+            <div className="mt-2 text-sm text-slate-400">You’re on track!</div>
+          </div>
+
+          <div className="rounded-[24px] border border-slate-100 bg-white p-6 shadow-[0_12px_35px_rgba(15,23,42,0.08)]">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+              <BarChart3 size={28} />
+            </div>
+            <div className="text-sm font-semibold text-slate-500">Learning Streak</div>
+            <div className="mt-3 text-4xl font-bold text-[#071333]">7</div>
+            <div className="mt-2 text-sm text-slate-400">Days in a row! 🔥</div>
+          </div>
+        </div>
+      </div>
+
+      {/* bottom cards */}
+      <div className="relative z-10 mt-10 grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+        <div className="rounded-[26px] border border-slate-100 bg-white p-7 shadow-[0_12px_35px_rgba(15,23,42,0.08)]">
+          <h3 className="text-xl font-bold text-[#071333]">Continue Learning</h3>
+
+          <div className="mt-8 flex items-center justify-between gap-5">
+            <div className="min-w-0">
+              <div className="truncate text-xl font-bold text-[#071333]">
+                {currentCourse}
+              </div>
+
+              <div className="mt-7 h-3 w-full min-w-[320px] rounded-full bg-slate-100">
+                <div
+                  className="h-3 rounded-full bg-[#f8b51b]"
+                  style={{ width: `${currentProgress}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="text-2xl font-bold text-[#071333]">
+              {currentProgress}%
+            </div>
+          </div>
         </div>
 
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
+        <div className="rounded-[26px] border border-slate-100 bg-white p-7 shadow-[0_12px_35px_rgba(15,23,42,0.08)]">
+          <h3 className="text-lg font-bold text-[#071333]">Upcoming Quiz</h3>
+          <div className="mt-5 text-xl font-bold text-[#071333]">
+            {learningPath?.learning_path?.[0]?.topic_name || "Continue your learning path"}
+          </div>
+          <div className="mt-2 text-sm text-slate-500">Take it anytime</div>
 
-          <button onClick={() => setSidebarTab("home")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold">Generate Learning Path</div>
-            <div className="mt-1 text-sm text-white/80">Start a diagnostic exam.</div>
+          <button
+            onClick={() => setSidebarTab("progress")}
+            className="mt-6 inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-[#071333] hover:bg-slate-50"
+          >
+            <ClipboardList size={16} />
+            Start Quiz
           </button>
-
-          <button onClick={() => setSidebarTab("path")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold">My Learning Path</div>
-            <div className="mt-1 text-sm text-white/80">Continue your path.</div>
-          </button>
-
-          <button onClick={() => setSidebarTab("ask")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold">Ask Course</div>
-            <div className="mt-1 text-sm text-white/80">Ask from course material.</div>
-          </button>
-
-          <button onClick={() => setSidebarTab("progress")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold">View Progress</div>
-            <div className="mt-1 text-sm text-white/80">Track completed subtopics.</div>
-          </button>
-
-          <button onClick={() => setSidebarTab("banks")} className="rounded-3xl bg-slate-900 p-5 text-left text-white hover:bg-slate-800">
-            <div className="font-semibold">Question Banks</div>
-            <div className="mt-1 text-sm text-white/80">Practice questions by chapter.</div>
-          </button>
-
         </div>
-      </Card>
-
-      {/* 🔽 OVERVIEW */}
-      <Card className="p-8">
-        <SectionTitle
-          title="Dashboard"
-          subtitle="Here is a quick overview of your Manara learning journey."
-        />
-
-        <div className="mt-6 grid gap-4 md:grid-cols-4">
-
-          {/* paths */}
-          <div className="rounded-3xl border bg-slate-50 p-5">
-            <div className="text-sm text-slate-500">Learning Paths</div>
-            <div className="mt-2 text-3xl font-semibold text-slate-900">
-              {totalPaths}
-            </div>
-          </div>
-
-          {/* overall */}
-          <div className="rounded-3xl border bg-slate-50 p-5">
-            <div className="text-sm text-slate-500">Overall Progress</div>
-            <div className="mt-2 text-3xl font-semibold text-slate-900">
-              {averageProgress}%
-            </div>
-          </div>
-
-          {/* current */}
-          <div className="rounded-3xl border bg-slate-50 p-5">
-            <div className="text-sm text-slate-500">Current Course Progress</div>
-            <div className="mt-2 text-3xl font-semibold text-slate-900">
-              {currentCourseProgress}%
-            </div>
-          </div>
-
-          {/* current path */}
-          <div className="rounded-3xl border bg-slate-50 p-5">
-            <div className="text-sm text-slate-500">Current Path</div>
-            <div className="mt-2 text-lg font-semibold text-slate-900">
-              {learningPath?.target_course || "None yet"}
-            </div>
-          </div>
-
-        </div>
-      </Card>
-
+      </div>
     </div>
   );
 }
+
 
 function Sidebar({
   open,
@@ -1215,12 +1231,14 @@ function AskCoursePage({ allCourses, askCourseState, setAskCourseState, onAsk, l
 
   return (
     <Card className="p-8">
+
       <SectionTitle
         title="Ask Course"
         subtitle="Chat with Manara about a selected course. Answers will include sources from course material."
       />
 
-      <div className="mt-6 max-w-4xl space-y-4">
+      {/* DROPDOWN */}
+      <div className="mt-6 max-w-xl">
         <select
           value={askCourseState.course}
           onChange={(e) =>
@@ -1230,101 +1248,132 @@ function AskCoursePage({ allCourses, askCourseState, setAskCourseState, onAsk, l
               chat: [],
             })
           }
-          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
+          className="w-full rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-[#0B1B3F]"
         >
-          <option value="">Choose course</option>
+          <option value="">Select course</option>
           {(allCourses || []).map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
+            <option key={c} value={c}>{c}</option>
           ))}
         </select>
+      </div>
 
-        {askCourseState.course ? (
-          <>
-            <div className="min-h-[360px] max-h-[520px] overflow-auto rounded-3xl border border-slate-200 bg-slate-50 p-5">
-              {!askCourseState.chat?.length ? (
-                <div className="text-center text-sm text-slate-500">
-                  Start chatting with Manara about {askCourseState.course}.
-                </div>
-              ) : (
-                <div className="space-y-5">
-                  {askCourseState.chat.map((msg, index) => (
-                    <div key={index} className="space-y-3">
-                      <div className="ml-auto max-w-[75%] rounded-3xl bg-slate-900 px-5 py-3 text-sm text-white">
-                        {msg.q}
+      {/* CHAT SECTION */}
+      {askCourseState.course && (
+        <div className="mt-8 space-y-6">
+
+          {/* CHAT BOX */}
+          <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+
+            <div className="space-y-6 max-h-[420px] overflow-auto pr-2">
+
+              {(askCourseState.chat || []).map((msg, index) => (
+                <div key={index} className="space-y-4">
+
+                  {/* USER MESSAGE */}
+                  <div className="flex justify-end">
+                    <div className="max-w-[70%] rounded-full bg-[#0B1B3F] px-5 py-3 text-sm text-white">
+                      {msg.q}
+                    </div>
+                  </div>
+
+                  {/* BOT MESSAGE */}
+                  <div className="flex items-start gap-4">
+
+                    {/* ROBOT */}
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center">
+                      <img
+                        src="/robot.png"
+                        alt="Manara Bot"
+                        className="h-20 w-20 object-contain"
+                      />
+                    </div>
+
+                    {/* MESSAGE */}
+                    <div className="flex-1">
+
+                      <div className="mb-2">
+                        <span className="inline-block rounded-full bg-[#0B1B3F] px-4 py-1 text-xs font-semibold text-white">
+                          Manara Bot
+                        </span>
                       </div>
 
-                      <div className="max-w-[85%] rounded-3xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-700">
-                        <div className="mb-2 font-semibold text-slate-900">
-                          Manara
-                        </div>
+                      <div className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-700 shadow-sm">
 
                         {msg.loading ? (
                           <div className="text-slate-500">Thinking...</div>
                         ) : (
-                          <MathText text={msg.a} className="leading-7" />
+                          <MathText text={msg.a || "No response"} />
                         )}
 
-                        {msg.sources?.length ? (
-                          <div className="mt-4 rounded-2xl bg-slate-50 p-3">
-                            <div className="mb-2 text-xs font-semibold text-slate-700">
+                        {/* SOURCES */}
+                        {msg.sources?.length > 0 && (
+                          <div className="mt-4">
+                            <div className="mb-2 text-xs font-semibold text-slate-600">
                               Sources
                             </div>
-                            <ul className="space-y-2 text-xs text-slate-600">
+
+                            <div className="flex flex-wrap gap-2">
                               {msg.sources.map((s, i) => (
-                                <li key={i} className="rounded-xl bg-white px-3 py-2">
-                                  {s.relative_path || s.file_name || "Source"}
-                                </li>
+                                <div
+                                  key={i}
+                                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600"
+                                >
+                                  {s.file_name || s.relative_path || "Source"}
+                                </div>
                               ))}
-                            </ul>
+                            </div>
                           </div>
-                        ) : null}
+                        )}
+
                       </div>
                     </div>
-                  ))}
-
-                  <div ref={bottomRef} />
+                  </div>
                 </div>
-              )}
-            </div>
+              ))}
 
-            <div className="flex gap-3">
-              <textarea
-                rows={2}
-                value={askCourseState.question}
-                onChange={(e) =>
-                  setAskCourseState((prev) => ({
-                    ...prev,
-                    question: e.target.value,
-                  }))
-                }
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    if (!loading && askCourseState.question.trim()) {
-                      onAsk();
-                    }
+              <div ref={bottomRef} />
+            </div>
+          </div>
+
+          {/* INPUT */}
+          <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-3 shadow-sm">
+
+            <input
+              value={askCourseState.question}
+              onChange={(e) =>
+                setAskCourseState((prev) => ({
+                  ...prev,
+                  question: e.target.value,
+                }))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (!loading && askCourseState.question.trim()) {
+                    onAsk();
                   }
-                }}
-                placeholder="Type your question..."
-                className="flex-1 resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
-              />
+                }
+              }}
+              placeholder="Type your question..."
+              className="flex-1 bg-transparent outline-none text-sm"
+            />
 
-              <button
-                onClick={onAsk}
-                disabled={loading || !askCourseState.question.trim()}
-                className="rounded-full bg-slate-900 px-6 py-3 font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-              >
-                Send
-              </button>
-            </div>
-          </>
-        ) : null}
-      </div>
+            <button
+              onClick={onAsk}
+              disabled={loading || !askCourseState.question.trim()}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-yellow-400 text-white hover:bg-yellow-500 disabled:opacity-50"
+            >
+              ➤
+            </button>
+
+          </div>
+
+        </div>
+      )}
     </Card>
   );
 }
+
 
 function ProgressPage({ progressData, onOpenCourse }) {
   return (
@@ -1730,140 +1779,200 @@ function AccountPage({
 
 function AboutUsPage() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
 
-      {/* ABOUT MANARA */}
-      <Card className="p-8">
+      {/* 🔥 HERO */}
+      <Card className="p-8 md:p-10">
+        <div className="grid md:grid-cols-2 gap-8 items-center">
 
-  {/* 🔥 LOGO */}
-  <div className="flex justify-center mb-4">
-    <img
-      src="/logo.png"
-      alt="Manara logo"
-      className="h-60 w-60 object-contain"
-    />
-  </div>
+          <div>
+            <h1 className="text-4xl md:text-5xl font-bold text-[#071333] leading-tight">
+              Guiding Students.
+              <br />
+              <span className="text-[#f8b51b]">Empowering Futures.</span>
+            </h1>
 
-  <SectionTitle
-    title="About Manara"
-    subtitle="Built with care for the PSUT community."
+            <p className="mt-5 text-slate-600 leading-7">
+              Manara is a personalized academic guidance system designed for PSUT students.
+              We help you understand, improve, and achieve — step by step.
+            </p>
+
+            <div className="mt-6 grid grid-cols-2 gap-4 text-sm">
+              <div className="flex items-center gap-2"><span className="text-[#f8b51b]">●</span> Personalized Learning</div>
+              <div className="flex items-center gap-2"><span className="text-[#f8b51b]">●</span> Track Progress</div>
+              <div className="flex items-center gap-2"><span className="text-[#f8b51b]">●</span> Achieve Goals</div>
+              <div className="flex items-center gap-2"><span className="text-[#f8b51b]">●</span> AI Support</div>
+            </div>
+          </div>
+
+          <div className="flex justify-center">
+
+  <img 
+
+    src="/students.png" 
+
+    className="rounded-3xl w-120" 
+
   />
 
-        <div className="mt-6 space-y-5 text-sm leading-7 text-slate-700">
-          <p>
-            Manara was not created as just another academic tool. It was built from real student experiences — the challenges of managing courses, understanding complex topics, and finding a clear starting point.
-          </p>
+</div>
 
-          <p>
-            We didn’t want students to keep guessing. We wanted to build something that understands them.
-          </p>
-
-          <p>
-            Manara is a personalized academic guidance system designed specifically for PSUT students.
-            It helps students study with purpose — not by doing more, but by focusing on exactly what matters.
-          </p>
-
-          <p>
-            The system begins with a diagnostic exam tailored to the target course. But it’s not just about a score —
-            it’s about understanding. Manara analyzes performance and traces weaknesses back to specific subtopics
-            from prerequisite courses — the hidden gaps that actually matter.
-          </p>
-
-          <p>
-            From there, it builds a personalized learning path that focuses only on what <b>you</b> need.
-            No wasted time. No unnecessary content. Just clear direction.
-          </p>
-
-          <p>
-            Unlike generic platforms, Manara is fully aligned with PSUT’s curriculum. Every exercise, every explanation,
-            and every recommendation comes directly from what students actually study.
-          </p>
-
-          <p>
-            Manara also offers:
-            <br />•  AI-generated exercises focused on your weak areas
-            <br />• Progress tracking through targeted mini quizzes
-            <br />• Course-specific question banks for effective practice
-            <br />• A chat-based assistant that answers using real course material
-          </p>
         </div>
       </Card>
 
-      {/* WHY THE NAME MANARA */}
+      {/* 🔥 ABOUT */}
       <Card className="p-8">
+        <SectionTitle title="About Manara" subtitle="Built with care for the PSUT community." />
+
+        <div className="mt-6 space-y-4 text-sm text-slate-600 max-w-3xl">
+          <p>Manara was not created as just another academic tool. It was built from real student experiences.</p>
+          <p>We didn’t want students to keep guessing. We wanted to build something that understands them.</p>
+          <p>Manara helps students study with purpose — focusing only on what matters.</p>
+          <p>It begins with a diagnostic exam, then builds a personalized learning path targeting real weaknesses.</p>
+        </div>
+
+        <div className="mt-8 grid md:grid-cols-2 gap-4">
+          {[
+            "AI-generated exercises focused on your weak areas",
+            "Progress tracking through targeted mini quizzes",
+            "Course-specific question banks",
+            "Chat-based assistant using real course material",
+          ].map((item, i) => (
+            <div key={i} className="rounded-2xl border bg-slate-50 px-4 py-3 text-sm">
+              {item}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* 🔥 WHY */}
+      <Card className="p-8">
+        <div className="grid md:grid-cols-2 gap-8 items-center">
+
+          <div>
+            <SectionTitle title="Why the name Manara?" subtitle="Guidance, clarity, and hope." />
+
+            <div className="mt-4 space-y-4 text-sm text-slate-600">
+              <p>Manara means a lighthouse in Arabic — a symbol of guidance that helps ships find their way through darkness,
+            through uncertainty, and through storms.</p>
+              <p>And that is exactly what we wanted this system to be.</p>
+              <p>Because studying doesn’t always feel clear. Sometimes it feels overwhelming, scattered, and heavy.
+            Manara is there in those moments — to guide, to simplify, and to help students move forward with confidence.</p>
+            </div>
+          </div>
+
+          <div className="relative w-full h-[320px]">
+            <svg viewBox="0 0 600 400" className="w-full h-full">
+              <defs>
+                <clipPath id="waveClip" clipPathUnits="objectBoundingBox">
+                  <path d="M0,0 H1 V1 H0.2 C0.05,0.85 0.05,0.6 0.2,0.5 C0.35,0.4 0.35,0.2 0.2,0.1 C0.1,0.05 0.05,0.02 0,0 Z"/>
+                </clipPath>
+              </defs>
+
+              <image
+                href="/lighthouse.png"
+                width="100%"
+                height="100%"
+                preserveAspectRatio="xMidYMid slice"
+                clipPath="url(#waveClip)"
+              />
+            </svg>
+          </div>
+
+        </div>
+      </Card>
+
+      {/* 🔥 TEAM */}
+<Card className="p-8">
+  <SectionTitle title="Our Team" />
+
+  <div className="mt-8 grid gap-6 md:grid-cols-2">
+
+    {/* DINA */}
+    <div className="rounded-3xl border p-6 text-center shadow-sm">
+      <img
+        src="/dina.jpg"
+        className="mx-auto h-44 w-44 rounded-full object-cover object-top border-4 shadow-md"
+      />
+
+      <h3 className="mt-4 font-semibold text-lg">
+        Dina Deya'a Al-Mimeh
+      </h3>
+
+      <p className="text-sm text-slate-500">
+        Data Science & AI — PSUT
+      </p>
+
+      <p className="mt-3 text-sm text-slate-600 leading-6">
+        Worked on both frontend and backend development, contributing to the overall system design, implementation, integration, building and enhancing the platform’s core features.
+      </p>
+    </div>
+
+    {/* MARAH */}
+    <div className="rounded-3xl border p-6 text-center shadow-sm">
+      <img
+        src="/marah.jpg"
+        className="mx-auto h-44 w-44 rounded-full object-cover object-top border-4 shadow-md"
+      />
+
+      <h3 className="mt-4 font-semibold text-lg">
+        Marah Abdelnaser Al-Shrouf
+      </h3>
+
+      <p className="text-sm text-slate-500">
+        Data Science & AI — PSUT
+      </p>
+
+      <p className="mt-3 text-sm text-slate-600 leading-6">
+        Worked across frontend and backend development, supporting system architecture, development, and integration, while playing a key role in building and refining the system’s main functionalities.
+
+      </p>
+    </div>
+
+  </div>
+
+  {/* 🔥 QUOTE */}
+  <div className="mt-10 text-center text-sm text-slate-600 max-w-2xl mx-auto">
+    <p className="italic">
+      “Manara carries pieces of our journey — every confusion, every late night,
+      every moment we didn’t know where to start — hoping to make someone else’s
+      path clearer.”
+    </p>
+  </div>
+</Card>
+
+      {/*  SUPERVISOR (CENTERED) */}
+      <Card className="p-8 text-center">
         <SectionTitle
-          title="Why the name Manara?"
-          subtitle="A name that represents guidance, clarity, and hope."
+          title="Project Supervisor"
         />
 
-        <div className="mt-6 space-y-5 text-sm leading-7 text-slate-700">
-          <p>
-            Manara means a lighthouse in Arabic — a symbol of guidance that helps ships find their way through darkness,
-            through uncertainty, and through storms.
+        <div className="mt-8 flex flex-col items-center">
+
+          <img
+            src="/dromar.png"
+            className="h-44 w-44 rounded-full object-cover object-top border-4 shadow-md"
+          />
+
+          <h3 className="mt-4 text-xl font-semibold text-[#071333]">
+            Dr. Omar Alqawasmeh
+          </h3>
+
+          <p className="text-sm text-slate-500">
+            Assistant Professor — PSUT
           </p>
 
-          <p>
-            And that is exactly what we wanted this system to be.
+          <p className="mt-3 max-w-xl text-sm text-slate-600">
+            Supervised and guided the development of Manara, providing expertise in artificial intelligence and system design.
           </p>
 
-          <p>
-            Because studying doesn’t always feel clear. Sometimes it feels overwhelming, scattered, and heavy.
-            Manara is there in those moments — to guide, to simplify, and to help students move forward with confidence.
+          <p className="mt-2 text-xs text-slate-400 whitespace-nowrap">
+            Special thanks to Dr. Omar Alqawasmeh for his guidance and mentorship, and to our faculty members, family, and friends for their continuous support.
           </p>
+
         </div>
       </Card>
 
-      {/* TEAM */}
-      <Card className="p-8">
-        <SectionTitle title="Our Team" />
-
-        <div className="mt-6 grid gap-6 md:grid-cols-2">
-          <div className="rounded-3xl border bg-slate-50 p-6 text-center">
-            <img
-              src="/dina.jpg"
-              alt="Dina"
-              className="mx-auto h-44 w-44 rounded-full object-cover object-top border-2 border-slate-200 transition hover:scale-105"
-            />
-
-            <div className="mt-4 font-semibold text-slate-900">
-              Dina Deya'a Al-Mimeh
-            </div>
-            <div className="text-sm text-slate-500">
-              Data Science & Artificial intelligence — PSUT
-            </div>
-
-            <p className="mt-3 text-sm text-slate-600">
-              Worked on both frontend and backend development, contributing to the overall system design, implementation, integration, building and enhancing the platform’s core features.
-            </p>
-          </div>
-
-          <div className="rounded-3xl border bg-slate-50 p-6 text-center">
-            <img
-              src="/marah.jpg"
-              alt="Marah"
-              className="mx-auto h-44 w-44 rounded-full object-cover object-top border-2 border-slate-200 transition hover:scale-105"
-            />
-
-            <div className="mt-4 font-semibold text-slate-900">
-              Marah Abdelnaser Al-Shrouf
-            </div>
-            <div className="text-sm text-slate-500">
-              Data Science & Artificial intelligence — PSUT
-            </div>
-
-            <p className="mt-3 text-sm text-slate-600">
-              Worked across frontend and backend development, supporting system architecture, development, and integration, while playing a key role in building and refining the system’s main functionalities.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-8 text-center text-sm text-slate-600 max-w-2xl mx-auto space-y-2">
-
-  <p>
-    Manara carries pieces of our own journey — every confusion, every late night, every moment we didn’t know where to start — with the hope that it makes someone else’s path a little clearer.
-  </p>
-</div>
-      </Card>
     </div>
   );
 }
@@ -1955,7 +2064,6 @@ export default function App() {
   const [diagnosticExam, setDiagnosticExam] = useState(null);
   const [diagnosticAnswers, setDiagnosticAnswers] = useState({});
   const [diagnosticResult, setDiagnosticResult] = useState(null);
-  const [learningPaths, setLearningPaths] = useState([]);
 
   const [exercisesLoading, setExercisesLoading] = useState(false);
   const [exerciseCounts, setExerciseCounts] = useState({});
@@ -2041,6 +2149,7 @@ if (unanswered) {
     alert(err.message || "Failed to submit quiz");
   }
   };
+
 
   const handleLogin = async () => {
     try {
@@ -2282,6 +2391,8 @@ const savePhoneFromAccount = async () => {
       }),
     });
 
+    console.log("PATH RESPONSE:", path);
+
     setLearningPath(path);
 
     setSidebarTab("path");
@@ -2453,14 +2564,18 @@ const savePhoneFromAccount = async () => {
   }, [screen, sidebarTab, student?.student_id]);
 
   useEffect(() => {
+  console.log("LEARNING PATH STATE:", learningPath);
+}, [learningPath]);
+
+useEffect(() => {
   if (screen !== "progress-details" || !selectedProgressCourse) return;
 
   api(`/track/${student.student_id}/${selectedProgressCourse.target_course}`)
-    .then(res => {
+    .then((res) => {
       setTrackingDetails(res);
     })
     .catch(() => setTrackingDetails(null));
-  }, [screen, selectedProgressCourse]);
+}, [screen, selectedProgressCourse, student?.student_id]);
 
   const startTrackingQuiz = async () => {
   try {
@@ -3083,9 +3198,11 @@ const renderAppBody = () => {
             <Menu size={18} />
           </button>
 
+          {sidebarTab !== "dashboard" && (
           <div className="hidden md:block text-3xl font-bold text-slate-800">
             Welcome, <span className="font-semibold">{student?.student_name}</span> 👋
           </div>
+          )}
 
           <button
             onClick={() => setScreen("account")}
