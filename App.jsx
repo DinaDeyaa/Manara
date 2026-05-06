@@ -2012,9 +2012,7 @@ function AboutUsPage() {
   {/* 🔥 QUOTE */}
   <div className="mt-10 text-center text-sm text-slate-600 max-w-2xl mx-auto">
     <p className="italic">
-      “Manara carries pieces of our journey — every confusion, every late night,
-      every moment we didn’t know where to start — hoping to make someone else’s
-      path clearer.”
+      “Manara carries pieces of our own journey — every confusion, every late night, every moment we didn’t know where to start — with the hope that it makes someone else’s path a little clearer.”
     </p>
   </div>
 </Card>
