@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
-from openai import OpenAI
 from chromadb.utils import embedding_functions
 
 
@@ -34,11 +33,17 @@ DIFFICULTY_DISTRIBUTION = {
     "hard": 3,
 }
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY is not set in your environment.")
+_openai_client = None
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+def get_llm_client():
+    global _openai_client
+    if _openai_client is None:
+        key = os.getenv("OPENAI_API_KEY")
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY is not set.")
+        from openai import OpenAI
+        _openai_client = OpenAI(api_key=key)
+    return _openai_client
 
 
 # =========================================================
@@ -56,12 +61,75 @@ def normalize_name(text: str) -> str:
 
 
 def question_signature(question_text: str) -> str:
+    """Exact-match fingerprint (MD5 of normalised text)."""
     normalized = normalize_name(question_text)
     return hashlib.md5(normalized.encode("utf-8")).hexdigest()
 
 
+# ── Semantic / near-duplicate helpers ─────────────────────────────────────────
+
+def _tokenize(text: str) -> set[str]:
+    """Lower-case word tokens, stripping punctuation."""
+    return set(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def jaccard_similarity(a: str, b: str) -> float:
+    """Word-level Jaccard similarity between two strings."""
+    ta, tb = _tokenize(a), _tokenize(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+# Stop-words to ignore when extracting the core concept of a question.
+_STOP_WORDS = frozenset({
+    "what", "which", "how", "when", "where", "who", "why", "is", "are",
+    "the", "a", "an", "of", "in", "to", "that", "does", "do", "can",
+    "best", "describes", "refers", "following", "correct", "statement",
+    "about", "with", "for", "its", "this", "these", "those", "term",
+    "used", "most", "one", "true", "false", "example", "called",
+})
+
+def extract_concept_keywords(question_text: str) -> frozenset[str]:
+    """
+    Return the meaningful content words from a question.
+    Two questions sharing many concept keywords likely test the same idea.
+    """
+    tokens = _tokenize(question_text)
+    return frozenset(t for t in tokens if t not in _STOP_WORDS and len(t) > 2)
+
+
+def concept_overlap(a: str, b: str) -> float:
+    """
+    Overlap coefficient on content-word sets — more sensitive than Jaccard
+    for detecting same-concept questions that differ in question framing.
+    """
+    ka, kb = extract_concept_keywords(a), extract_concept_keywords(b)
+    if not ka or not kb:
+        return 0.0
+    return len(ka & kb) / min(len(ka), len(kb))
+
+
+# Threshold constants
+_JACCARD_THRESHOLD = 0.50   # ≥50 % word overlap → near-duplicate
+_CONCEPT_THRESHOLD = 0.65   # ≥65 % concept-word overlap → same concept
+
+
+def is_near_duplicate(candidate: str, existing_questions: list[str]) -> bool:
+    """
+    Return True if *candidate* is too similar to any question already accepted.
+    Uses both Jaccard word-overlap and concept-keyword overlap.
+    """
+    for existing in existing_questions:
+        if jaccard_similarity(candidate, existing) >= _JACCARD_THRESHOLD:
+            return True
+        if concept_overlap(candidate, existing) >= _CONCEPT_THRESHOLD:
+            return True
+    return False
+
+
 def ask_llm(prompt: str) -> str:
-    response = client.chat.completions.create(
+    response = get_llm_client().chat.completions.create(
         model=MODEL_NAME,
         messages=[
             {
@@ -76,7 +144,6 @@ def ask_llm(prompt: str) -> str:
                 "content": prompt,
             },
         ],
-        temperature=0.7,
         max_completion_tokens=MAX_COMPLETION_TOKENS,
     )
     return response.choices[0].message.content.strip()
@@ -87,8 +154,23 @@ def extract_json_block(text: str):
     if not match:
         return None
 
+    raw = match.group(0)
+
+    # ── Repair invalid JSON escape sequences produced by LLMs ────────────────
+    # LLMs emit LaTeX like \( \) \frac \sum inside JSON string values.
+    # These are not valid JSON escape sequences and cause json.loads to fail.
+    # Valid JSON escapes are only: \" \\ \/ \b \f \n \r \t \uXXXX
+    # So replace any \X where X is not one of those with \\X.
+    def repair_json_escapes(s: str) -> str:
+        return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', s)
+
     try:
-        return json.loads(match.group(0))
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    try:
+        return json.loads(repair_json_escapes(raw))
     except Exception:
         return None
 
@@ -379,68 +461,74 @@ def build_context_text(retrieved: dict[str, Any]) -> str:
 # QUESTION GENERATION
 # =========================================================
 
-def validate_difficulty_distribution(questions: list[dict]):
-    counts = {"easy": 0, "medium": 0, "hard": 0}
-    for q in questions:
-        counts[q["difficulty"]] += 1
+# =========================================================
+# CONCEPT NODE EXTRACTION
+# ─────────────────────────────────────────────────────────
+# The root cause of semantic repetition is generating all
+# questions from the same narrow slice of context.  The LLM
+# circles the dominant idea (e.g. "learning improves with
+# experience") and produces multiple questions that differ
+# only in surface wording but test the same learning
+# objective.
+#
+# The fix:  extract DISTINCT CONCEPT NODES from the material
+# first, then generate exactly ONE question per node.  Each
+# node is a short, specific, testable idea.  A question that
+# covers node X is blocked from also covering any idea too
+# close to node X.
+# =========================================================
 
-    if counts != DIFFICULTY_DISTRIBUTION:
-        raise ValueError(
-            f"Wrong difficulty distribution. Expected {DIFFICULTY_DISTRIBUTION}, got {counts}"
-        )
-
-
-def generate_questions_for_subtopic(
+def extract_concept_nodes(
     course_name: str,
     topic_name: str,
     subtopic_name: str,
     context_text: str,
-    previous_question_texts: list[str],
+    n: int,
 ) -> list[dict]:
-    previous_block = "\n".join(
-        [f"- {q}" for q in previous_question_texts[-50:]]
-    ).strip()
+    """
+    Ask the LLM to identify *n* distinct, testable concept nodes from the
+    course material.
 
-    if not previous_block:
-        previous_block = "None"
+    Each node is:
+      - a SHORT label  (3-8 words, e.g. "definition of supervised learning")
+      - a BRIEF description (1-2 sentences drawn only from the material)
+      - a QUESTION STYLE hint  (definition | comparison | application |
+                                 consequence | example | identification | ordering)
 
+    Returns a list of dicts:
+      [{"label": str, "description": str, "style": str}, ...]
+
+    Falls back to a generic list of n placeholder nodes if the LLM fails,
+    so the rest of the pipeline always has something to work with.
+    """
     prompt = f"""
-You are generating a progress-tracking mini quiz for one academic subtopic.
+You are a curriculum designer reading course material.
+Your job is to identify exactly {n} DISTINCT, TESTABLE concept nodes.
 
-IMPORTANT RULES:
-- Use ONLY the provided course material.
-- Do NOT use outside knowledge.
-- Do NOT invent facts not supported by the context.
-- Generate exactly {QUESTIONS_PER_SUBTOPIC} multiple-choice questions.
-- Each question must have 4 options: A, B, C, D.
-- Exactly one correct answer.
-- The quiz is out of 10, so return exactly 10 questions.
-- Difficulty distribution must be exactly:
-  - 3 easy
-  - 4 medium
-  - 3 hard
-- Questions must stay focused on THIS subtopic.
-- Avoid duplicates.
-- Do NOT repeat or paraphrase previous questions listed below.
-- Include questions from text, diagrams, charts, code, formulas, flowcharts, and visual explanations whenever supported by context.
-- Return ONLY valid JSON.
+RULES FOR CONCEPT NODES:
+- Each node must be a DIFFERENT idea — not a rephrasing of another node.
+- Nodes must come ONLY from the provided material.
+- Do NOT create two nodes about the same underlying idea.
+  BAD (same idea, different angle):
+    - "learning improves with experience"
+    - "performance increases through practice"
+    - "experience from datasets improves models"
+  GOOD (genuinely distinct):
+    - "definition of supervised learning"
+    - "role of labeled training data"
+    - "difference between classification and regression"
+    - "overfitting and how to detect it"
+- Cover the BREADTH of the material, not just the first paragraph.
+- Each node must be independently testable in one MCQ question.
+- Assign a question style: definition | comparison | application |
+  consequence | example | identification | ordering
 
-PREVIOUS QUESTIONS THAT MUST NOT BE REPEATED:
-{previous_block}
-
-Return JSON in this exact format:
+Return ONLY valid JSON — a list of exactly {n} objects:
 [
   {{
-    "question": "....",
-    "options": {{
-      "A": "...",
-      "B": "...",
-      "C": "...",
-      "D": "..."
-    }},
-    "correct_answer": "A",
-    "difficulty": "easy",
-    "explanation": "Short explanation based only on the course material."
+    "label": "short concept label (3-8 words)",
+    "description": "1-2 sentence description drawn only from the material.",
+    "style": "definition"
   }}
 ]
 
@@ -449,58 +537,261 @@ Topic: {topic_name}
 Subtopic: {subtopic_name}
 
 COURSE MATERIAL:
-{context_text[:18000]}
+{context_text[:14000]}
 """
-
-    parsed = ask_llm_for_json(prompt)
+    try:
+        parsed = ask_llm_for_json(prompt)
+    except ValueError:
+        parsed = []
 
     if not isinstance(parsed, list):
-        raise ValueError("LLM did not return a valid list of questions.")
+        parsed = []
 
-    if len(parsed) != QUESTIONS_PER_SUBTOPIC:
-        raise ValueError(
-            f"Expected {QUESTIONS_PER_SUBTOPIC} questions, got {len(parsed)}."
-        )
+    # Validate and clean each node
+    nodes: list[dict] = []
+    valid_styles = {
+        "definition", "comparison", "application",
+        "consequence", "example", "identification", "ordering",
+    }
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label", "")).strip()
+        description = str(item.get("description", "")).strip()
+        style = str(item.get("style", "definition")).strip().lower()
+        if style not in valid_styles:
+            style = "definition"
+        if label and description:
+            nodes.append({"label": label, "description": description, "style": style})
 
-    cleaned_questions = []
-    seen_signatures = set()
+    # Deduplicate nodes by label similarity — prevents the LLM from
+    # returning near-duplicate nodes even when told not to.
+    deduped_nodes: list[dict] = []
+    seen_node_texts: list[str] = []
+    for node in nodes:
+        combined = node["label"] + " " + node["description"]
+        if is_near_duplicate(combined, seen_node_texts):
+            continue
+        # Also check concept-overlap between node labels specifically
+        duplicate = False
+        for seen in seen_node_texts:
+            if concept_overlap(node["label"], seen) >= 0.60:
+                duplicate = True
+                break
+        if duplicate:
+            continue
+        deduped_nodes.append(node)
+        seen_node_texts.append(combined)
 
-    previous_signatures = {question_signature(q) for q in previous_question_texts}
+    # Pad with placeholder nodes if LLM returned too few
+    while len(deduped_nodes) < n:
+        idx = len(deduped_nodes) + 1
+        deduped_nodes.append({
+            "label": f"concept {idx} from {subtopic_name}",
+            "description": f"An aspect of {subtopic_name} covered in the course material.",
+            "style": "definition",
+        })
 
-    for q in parsed:
-        question_text = str(q.get("question", "")).strip()
-        options = q.get("options", {})
-        correct = str(q.get("correct_answer", "")).strip().upper()
-        difficulty = str(q.get("difficulty", "")).strip().lower()
-        explanation = str(q.get("explanation", "")).strip()
+    return deduped_nodes[:n]
 
+
+# ── Cluster-level concept guard ────────────────────────────────────────────────
+
+# Tighter threshold for cluster-level blocking — lower than the pairwise
+# question threshold because we're comparing a generated question against
+# a concept node label (shorter text, so overlap concentrates faster).
+_NODE_CLUSTER_THRESHOLD = 0.45
+
+
+def _question_covers_node(question_text: str, node: dict) -> bool:
+    """
+    Return True if *question_text* is primarily about the given concept node.
+    Checks both Jaccard similarity and concept-keyword overlap against the
+    node's label and description combined.
+    """
+    node_text = node["label"] + " " + node["description"]
+    if jaccard_similarity(question_text, node_text) >= _JACCARD_THRESHOLD:
+        return True
+    if concept_overlap(question_text, node_text) >= _NODE_CLUSTER_THRESHOLD:
+        return True
+    # Also check just the label — a short, dense match is decisive
+    if concept_overlap(question_text, node["label"]) >= 0.55:
+        return True
+    return False
+
+
+def _question_invades_claimed_node(
+    question_text: str,
+    claimed_nodes: list[dict],
+    own_node: dict,
+) -> bool:
+    """
+    Return True if *question_text* covers a concept node that has already
+    been claimed by another accepted question (i.e. not its own node).
+    This is the cluster-level guard that prevents "orbit" repetition.
+    """
+    for node in claimed_nodes:
+        if node is own_node:
+            continue
+        if _question_covers_node(question_text, node):
+            return True
+    return False
+
+
+# ── Post-generation helpers (unchanged logic, kept here for clarity) ──────────
+
+def _assign_correct_answers(questions: list[dict]) -> list[dict]:
+    """
+    Distribute correct answers across A/B/C/D so the answer pattern is not
+    all-A.  Cycles A→B→C→D→A… and swaps option content so correctness is
+    preserved.
+    """
+    cycle = ["A", "B", "C", "D"]
+    result = []
+    for i, q in enumerate(questions):
+        target_label = cycle[i % 4]
+        if target_label == "A":
+            result.append(q)
+            continue
+        opts = dict(q["options"])
+        opts["A"], opts[target_label] = opts[target_label], opts["A"]
+        result.append({**q, "options": opts, "correct_answer": target_label})
+    return result
+
+
+def _heal_difficulty_distribution(questions: list[dict]) -> list[dict]:
+    """
+    Re-label difficulties so the final list always satisfies
+    DIFFICULTY_DISTRIBUTION without discarding questions.
+    """
+    target = list(DIFFICULTY_DISTRIBUTION.keys())
+    counts = list(DIFFICULTY_DISTRIBUTION.values())
+    desired: list[str] = []
+    for label, n in zip(target, counts):
+        desired.extend([label] * n)
+    healed = []
+    for q, diff in zip(questions, desired):
+        healed.append({**q, "difficulty": diff})
+    return healed
+
+
+# ── Per-node question generation ──────────────────────────────────────────────
+
+def _generate_question_for_node(
+    course_name: str,
+    topic_name: str,
+    subtopic_name: str,
+    context_text: str,
+    node: dict,
+    difficulty_label: str,
+    previous_question_texts: list[str],
+    accepted_questions: list[dict],
+) -> dict | None:
+    """
+    Generate exactly one MCQ question that tests *node* and nothing else.
+
+    Returns the validated question dict, or None if generation fails after
+    retries.  The node's label, description, and style are injected directly
+    into the prompt so the LLM cannot drift toward a neighbouring concept.
+    """
+    previous_block = (
+        "\n".join(f"- {q}" for q in previous_question_texts[-40:]).strip() or "None"
+    )
+    accepted_block = (
+        "\n".join(f"- {q['question']}" for q in accepted_questions).strip() or "None"
+    )
+
+    MAX_RETRIES = 4
+    for attempt in range(MAX_RETRIES):
+        prompt = f"""
+You are writing ONE multiple-choice question for a progress-tracking quiz.
+
+TARGET CONCEPT — you MUST test ONLY this specific idea:
+  Label      : {node["label"]}
+  Description: {node["description"]}
+  Style      : {node["style"]}
+
+HARD CONSTRAINTS:
+- The question must be answerable ONLY from the provided course material.
+- Difficulty: {difficulty_label}
+- Do NOT drift to other concepts — stay tightly on the target concept above.
+- Do NOT repeat or paraphrase any question in the lists below.
+- The correct answer goes in option "A"; distractors in B, C, D.
+- Return ONLY valid JSON — a single object (not a list).
+
+QUESTIONS ALREADY IN THIS QUIZ (do not repeat their concepts):
+{accepted_block}
+
+QUESTIONS FROM PREVIOUS ATTEMPTS (do not repeat or paraphrase):
+{previous_block}
+
+Return JSON:
+{{
+  "question": "...",
+  "options": {{
+    "A": "...correct answer...",
+    "B": "...wrong...",
+    "C": "...wrong...",
+    "D": "...wrong..."
+  }},
+  "correct_answer": "A",
+  "difficulty": "{difficulty_label}",
+  "explanation": "Short explanation based only on the course material."
+}}
+
+Course: {course_name}
+Topic: {topic_name}
+Subtopic: {subtopic_name}
+
+COURSE MATERIAL:
+{context_text[:14000]}
+"""
+        try:
+            parsed = ask_llm_for_json(prompt)
+        except ValueError:
+            continue
+
+        if not isinstance(parsed, dict):
+            continue
+
+        question_text = str(parsed.get("question", "")).strip()
+        options = parsed.get("options", {})
+        correct = str(parsed.get("correct_answer", "")).strip().upper()
+        explanation = str(parsed.get("explanation", "")).strip()
+
+        # ── Basic validation ──────────────────────────────────────────────
         if not question_text:
-            raise ValueError("Empty question text found.")
-
+            continue
         if correct not in {"A", "B", "C", "D"}:
-            raise ValueError("Invalid correct_answer found.")
-
-        if difficulty not in {"easy", "medium", "hard"}:
-            raise ValueError("Invalid difficulty found.")
-
+            continue
         if not isinstance(options, dict) or set(options.keys()) != {"A", "B", "C", "D"}:
-            raise ValueError("Invalid options format found.")
+            continue
+        if any(not str(v).strip() for v in options.values()):
+            continue
 
         options, correct = force_correct_answer_a(options, correct)
 
+        # ── Exact-match duplicate check ───────────────────────────────────
         sig = question_signature(question_text)
-
-        # skip duplicates in same quiz
-        if sig in seen_signatures:
+        prev_sigs = {question_signature(q) for q in previous_question_texts}
+        acc_sigs = {question_signature(q["question"]) for q in accepted_questions}
+        if sig in prev_sigs or sig in acc_sigs:
             continue
 
-        # skip repeats from previous attempts (NO crash)
-        if sig in previous_signatures:
+        # ── Semantic duplicate check against history and accepted ─────────
+        all_existing = previous_question_texts + [q["question"] for q in accepted_questions]
+        if is_near_duplicate(question_text, all_existing):
             continue
 
-        seen_signatures.add(sig)
+        # ── Concept coverage check: must cover its own node ───────────────
+        if not _question_covers_node(question_text, node):
+            # LLM drifted — the question doesn't actually address the target
+            # concept.  On the last attempt, accept it anyway rather than
+            # returning None, as it's still a valid question about the subtopic.
+            if attempt < MAX_RETRIES - 1:
+                continue
 
-        cleaned_questions.append({
+        return {
             "question": question_text,
             "options": {
                 "A": str(options["A"]).strip(),
@@ -509,21 +800,141 @@ COURSE MATERIAL:
                 "D": str(options["D"]).strip(),
             },
             "correct_answer": "A",
-            "difficulty": difficulty,
+            "difficulty": difficulty_label,
             "explanation": explanation,
-        })
+            "concept_node": node["label"],   # kept for diagnostics; stripped before return
+        }
 
-    if len(cleaned_questions) < QUESTIONS_PER_SUBTOPIC:
-        return generate_questions_for_subtopic(
-        course_name,
-        topic_name,
-        subtopic_name,
-        context_text,
-        previous_question_texts
+    return None
+
+
+# ── Main quiz generation entry point ──────────────────────────────────────────
+
+def generate_questions_for_subtopic(
+    course_name: str,
+    topic_name: str,
+    subtopic_name: str,
+    context_text: str,
+    previous_question_texts: list[str],
+    _depth: int = 0,
+) -> list[dict]:
+    """
+    Generate exactly QUESTIONS_PER_SUBTOPIC diverse, non-duplicate MCQs.
+
+    New strategy (concept-node-driven):
+    ─────────────────────────────────────────────────────────────────
+    1. Extract QUESTIONS_PER_SUBTOPIC distinct concept nodes from the
+       material using a dedicated LLM call.  Each node is a short,
+       specific, independently testable idea drawn from across the
+       breadth of the content.
+
+    2. Assign a difficulty label to each node so the distribution
+       always satisfies DIFFICULTY_DISTRIBUTION exactly.
+
+    3. Generate ONE question per node — the node's label, description,
+       and question style are injected directly into the prompt so the
+       LLM cannot drift toward a neighbouring concept cluster.
+
+    4. Apply three deduplication layers per question:
+         a. Exact MD5 match against history and accepted questions
+         b. Jaccard word-overlap (≥50%) → reject
+         c. Concept-keyword overlap (≥65%) → reject
+       Plus a cluster-level guard: once a node is claimed by an
+       accepted question, no other question may target a semantically
+       adjacent node.
+
+    5. If a node's question fails all retries, attempt to regenerate
+       it with a relaxed constraint (accept even if the question drifted
+       slightly from the node).
+
+    6. Heal the difficulty distribution, distribute answer labels
+       A/B/C/D evenly, strip diagnostic metadata before returning.
+    """
+    MAX_DEPTH = 3
+    if _depth >= MAX_DEPTH:
+        raise ValueError(
+            f"Could not generate {QUESTIONS_PER_SUBTOPIC} unique questions "
+            f"for subtopic '{subtopic_name}' after {MAX_DEPTH} full retries."
         )
 
-    validate_difficulty_distribution(cleaned_questions)
-    return cleaned_questions
+    # ── Step 1: Extract concept nodes ─────────────────────────────────────
+    # Request more nodes than needed so we have spares if some fail generation.
+    node_request_count = min(QUESTIONS_PER_SUBTOPIC + 3, QUESTIONS_PER_SUBTOPIC * 2)
+    nodes = extract_concept_nodes(
+        course_name=course_name,
+        topic_name=topic_name,
+        subtopic_name=subtopic_name,
+        context_text=context_text,
+        n=node_request_count,
+    )
+
+    # ── Step 2: Assign difficulty labels to nodes ──────────────────────────
+    # Build the target sequence: [easy×3, medium×4, hard×3, easy, medium, ...]
+    diff_sequence: list[str] = []
+    for label, count in DIFFICULTY_DISTRIBUTION.items():
+        diff_sequence.extend([label] * count)
+    # Extend cyclically in case we have spare nodes
+    while len(diff_sequence) < len(nodes):
+        diff_sequence.extend(diff_sequence[:QUESTIONS_PER_SUBTOPIC])
+    node_difficulties = diff_sequence[:len(nodes)]
+
+    # ── Step 3: Generate one question per node ────────────────────────────
+    accepted: list[dict] = []
+    claimed_nodes: list[dict] = []   # nodes that have a successfully generated question
+
+    for node, difficulty_label in zip(nodes, node_difficulties):
+        if len(accepted) >= QUESTIONS_PER_SUBTOPIC:
+            break
+
+        q = _generate_question_for_node(
+            course_name=course_name,
+            topic_name=topic_name,
+            subtopic_name=subtopic_name,
+            context_text=context_text,
+            node=node,
+            difficulty_label=difficulty_label,
+            previous_question_texts=previous_question_texts,
+            accepted_questions=accepted,
+        )
+
+        if q is None:
+            print(f"  Node '{node['label']}': generation failed, skipping.")
+            continue
+
+        # ── Cluster-level guard ───────────────────────────────────────────
+        # Reject if this question's concept overlaps with a node already claimed.
+        if _question_invades_claimed_node(q["question"], claimed_nodes, node):
+            print(f"  Node '{node['label']}': question invaded another node's cluster, skipping.")
+            continue
+
+        accepted.append(q)
+        claimed_nodes.append(node)
+
+    # ── Step 4: Fallback if we're short ───────────────────────────────────
+    if len(accepted) < QUESTIONS_PER_SUBTOPIC:
+        print(
+            f"WARNING: Only generated {len(accepted)}/{QUESTIONS_PER_SUBTOPIC} "
+            f"questions from concept nodes.  Retrying (depth {_depth + 1})."
+        )
+        return generate_questions_for_subtopic(
+            course_name=course_name,
+            topic_name=topic_name,
+            subtopic_name=subtopic_name,
+            context_text=context_text,
+            previous_question_texts=previous_question_texts,
+            _depth=_depth + 1,
+        )
+
+    # ── Step 5: Finalise ──────────────────────────────────────────────────
+    final = accepted[:QUESTIONS_PER_SUBTOPIC]
+    final = _heal_difficulty_distribution(final)
+    final = _assign_correct_answers(final)
+
+    # Strip internal diagnostic key before handing off
+    for q in final:
+        q.pop("concept_node", None)
+
+    return final
 
 
 # =========================================================
