@@ -1,65 +1,98 @@
-from twilio.rest import Client
-import schedule
+from __future__ import annotations
+
+import os
+import re
+import json
 import time
-import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
+import pandas as pd
+import schedule
 from openai import OpenAI
-import os
+from twilio.rest import Client
 
-import json
-import re
+from studentprofile import (
+    parse_activity_dates,
+    update_last_reminder_sent,
+    PROFILES_CSV,
+)
 
-# 📁 Paths
-BASE_DIR = Path("/Users/dinaal-memah/Desktop/graduation project 2")
-PROFILES_CSV = BASE_DIR / "student_profiles" / "student_profiles.csv"
+# =========================================================
+# CONFIG
+# =========================================================
+
+BASE_DIR     = Path("/Users/dinaal-memah/Desktop/graduation project 2")
 PROGRESS_DIR = BASE_DIR / "progress_tracking_results"
 
-# 🔑 Twilio Credentials
-TWILIO_SID = "ACca49cd35417de2eb89217201c9baff68"
-TWILIO_AUTH = "3c165dd545f6c4e08377fcd6947cd628"
+# Twilio credentials — NEVER hardcode. Set these in your shell environment:
+#   export TWILIO_SID="ACxxx..."
+#   export TWILIO_AUTH="xxx..."
+#   export TWILIO_FROM="whatsapp:+14155238886"
+_TWILIO_SID  = os.getenv("TWILIO_SID", "")
+_TWILIO_AUTH = os.getenv("TWILIO_AUTH", "")
+_TWILIO_FROM = os.getenv("TWILIO_FROM", "whatsapp:+14155238886")
 
-client = Client(TWILIO_SID, TWILIO_AUTH)
-client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+if not _TWILIO_SID or not _TWILIO_AUTH:
+    raise EnvironmentError(
+        "TWILIO_SID and TWILIO_AUTH must be set as environment variables. "
+        "Do NOT hardcode credentials in source files."
+    )
 
-# ================================
-# 📞 FORMAT NUMBER
-# ================================
-def format_phone_number(to):
-    number = str(to).strip()
-    number = re.sub(r"[^\d+]", "", number)
+twilio_client = Client(_TWILIO_SID, _TWILIO_AUTH)
+ai_client     = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+MODEL_NAME = "gpt-5.4-nano"
+
+
+# =========================================================
+# PHONE FORMATTING
+# =========================================================
+
+def format_phone_number(raw: str) -> str:
+    number = re.sub(r"[^\d+]", "", str(raw).strip())
 
     if number.startswith("+"):
         return number
-
-    # if starts with 962 already
     if number.startswith("962"):
         return f"+{number}"
 
-    # local Jordan number
     number = number.lstrip("0")
     return f"+962{number}"
 
-# ================================
-# 📩 SEND MESSAGE
-# ================================
-def send_whatsapp_message(to, message):
+
+# =========================================================
+# SEND
+# =========================================================
+
+def send_whatsapp_message(to: str, message: str) -> bool:
+    """Send a WhatsApp message. Returns True on success."""
     try:
-        formatted_number = format_phone_number(to)
-
-        client.messages.create(
-            from_="whatsapp:+14155238886",
-            to=f"whatsapp:{formatted_number}",
-            body=message
+        formatted = format_phone_number(to)
+        twilio_client.messages.create(
+            from_=_TWILIO_FROM,
+            to=f"whatsapp:{formatted}",
+            body=message,
         )
-
-        print(f"✅ Sent to {formatted_number}")
-
+        print(f"  ✅ Sent to {formatted}")
+        return True
     except Exception as e:
-        print(f"❌ Error sending to {to}: {e}")
+        print(f"  ❌ Failed to send to {to}: {e}")
+        return False
 
-def generate_message(student, progress, inactive_days, tone):
+
+# =========================================================
+# AI MESSAGE GENERATION
+# =========================================================
+
+def generate_message(student: dict, progress: float, inactive_days: int | str) -> str:
+    if progress < 30:
+        tone = "encourage start"
+    elif progress < 80:
+        tone = "keep going"
+    else:
+        tone = "almost done"
+
     try:
         prompt = f"""
 You are an academic assistant.
@@ -72,149 +105,226 @@ Rules:
 - avoid robotic wording
 - do NOT mention exact large inactivity numbers
 - if inactivity is high, say "you haven't been active for a while"
-- encourage small action
+- encourage a small, specific action
 
 Tone: {tone}
-
-Student name: {student.get("student_name")}
+Student name: {student.get("student_name", "Student")}
 Progress: {progress}%
-Inactive: {inactive_days}
+Inactive: {inactive_days} days
 
-Return ONLY the message.
-"""
+Return ONLY the message text — no quotes, no labels.
+""".strip()
 
-        response = client_ai.chat.completions.create(
-            model="gpt-5.4-nano",
+        response = ai_client.chat.completions.create(
+            model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_completion_tokens=100
+            max_completion_tokens=100,
         )
-
         return response.choices[0].message.content.strip()
 
     except Exception as e:
-        print(f"AI error: {e}")
+        print(f"  AI generation error: {e}")
+        name = student.get("student_name", "Student")
+        return (
+            f"Hi {name} 👋\n\n"
+            "We miss you on Manara 📚\n"
+            "Jump back in and continue your learning journey 🚀"
+        )
 
-        return f"""Hi {student.get('student_name', 'Student')} 👋
 
-    Keep going — you're closer than you think 📚
-    Jump back in and continue your progress 🚀"""
+# =========================================================
+# LOAD STUDENTS
+# =========================================================
 
-# ================================
-# 📄 LOAD STUDENTS
-# ================================
-def load_students():
+def load_students() -> list[dict]:
+    """
+    Load all student profiles from CSV.
+    Parses activity_dates from pipe-delimited string into a list.
+    """
     if not PROFILES_CSV.exists():
-        print("❌ CSV not found")
+        print("❌ student_profiles.csv not found")
         return []
 
-    df = pd.read_csv(PROFILES_CSV).fillna("")
-    return df.to_dict(orient="records")
+    df = pd.read_csv(PROFILES_CSV, dtype=str).fillna("")
+    students = df.to_dict(orient="records")
 
-# ================================
-# 📊 GET PROGRESS
-# ================================
-def get_progress(student_id):
+    for s in students:
+        # Parse pipe-delimited activity_dates into a sorted list of YYYY-MM-DD strings
+        s["activity_dates"] = parse_activity_dates(s.get("activity_dates", ""))
+
+    return students
+
+
+# =========================================================
+# PROGRESS
+# =========================================================
+
+def get_progress(student_id: str) -> float:
+    """Return the student's latest learning path progress percentage (0–100)."""
     if not PROGRESS_DIR.exists():
-        return 0
+        return 0.0
 
     for file in PROGRESS_DIR.glob(f"progress_{student_id}_*.json"):
         try:
-            with open(file, "r") as f:
+            with open(file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return float(data.get("progress_percent", 0))
-        except:
-            return 0
+        except Exception:
+            return 0.0
 
-    return 0
+    return 0.0
 
-# ================================
-# 🧠 INACTIVITY
-# ================================
-def get_inactive_days(last_active_at):
-    if not last_active_at:
+
+# =========================================================
+# INACTIVITY — uses activity_dates as primary source
+# =========================================================
+
+def get_last_active_date(student: dict) -> date | None:
+    """
+    Return the most recent calendar date the student performed a learning action.
+
+    Priority:
+    1. Newest date in activity_dates  (real learning events: exam submit,
+       quiz submit, exercises generated, chatbot used)
+    2. Date portion of last_active_at (login timestamp — fallback only)
+    3. None if neither exists
+    """
+    # Primary: activity_dates list (already parsed by load_students)
+    dates: list[str] = student.get("activity_dates") or []
+    if dates:
+        try:
+            return datetime.strptime(dates[0], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    # Fallback: last_active_at timestamp
+    raw = str(student.get("last_active_at", "")).strip()
+    if raw:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except ValueError:
+                continue
+
+    return None
+
+
+def get_inactive_days(student: dict) -> int:
+    """
+    Return how many calendar days have elapsed since the student's last
+    learning activity.  Returns 999 if no activity record exists.
+    """
+    last = get_last_active_date(student)
+    if last is None:
         return 999
+    return (date.today() - last).days
 
+
+# =========================================================
+# DUPLICATE-SEND GUARD
+# =========================================================
+
+def was_reminded_today(student: dict) -> bool:
+    """
+    Return True if a reminder was already sent to this student today.
+    Reads last_reminder_sent_at from the CSV row (YYYY-MM-DD).
+    """
+    raw = str(student.get("last_reminder_sent_at", "")).strip()
+    if not raw:
+        return False
     try:
-        last_active = datetime.strptime(last_active_at, "%Y-%m-%d %H:%M:%S")
-        return (datetime.now() - last_active).days
-    except:
-        return 999
+        sent_date = datetime.strptime(raw, "%Y-%m-%d").date()
+        return sent_date == date.today()
+    except ValueError:
+        return False
 
-# ================================
-# ⚠️ CONDITION (REAL LOGIC)
-# ================================
-def should_send_reminder(student):
-    phone = str(student.get("phone_number", "")).strip()
-    opt_in = str(student.get("whatsapp_opt_in", "")).lower() == "true"
-    student_id = student.get("student_id", "")
 
-    progress = get_progress(student_id)
-    inactive_days = get_inactive_days(student.get("last_active_at", ""))
+# =========================================================
+# REMINDER CONDITION
+# =========================================================
 
-    print(f"DEBUG → {student_id} | progress={progress} | inactive={inactive_days}")
+def should_send_reminder(student: dict) -> tuple[bool, float, int]:
+    """
+    Returns (should_send, progress_pct, inactive_days).
 
-    return (
-        phone != "" and
-        opt_in and
-        progress < 100 and
-        inactive_days >= 2  
+    A reminder is sent when ALL of the following are true:
+    - Student has a valid phone number
+    - Student opted in to WhatsApp reminders
+    - Student has not completed all learning steps (progress < 100%)
+    - Student has been inactive for at least 2 full calendar days
+      (active today = 0 days, active yesterday = 1 day → both skipped)
+    - Student has NOT already received a reminder today
+    """
+    phone   = str(student.get("phone_number", "")).strip()
+    opt_in  = str(student.get("whatsapp_opt_in", "")).lower() == "true"
+    sid     = student.get("student_id", "")
+
+    if not phone or not opt_in:
+        return False, 0.0, 0
+
+    progress     = get_progress(sid)
+    inactive     = get_inactive_days(student)
+
+    print(
+        f"  [{sid}] progress={progress:.0f}%  "
+        f"inactive={inactive}d  "
+        f"reminded_today={was_reminded_today(student)}"
     )
 
-# ================================
-# 💬 MESSAGE
-# ================================
-def build_message(student):
-    return f"""Hi {student.get('student_name', 'Student')} 👋
+    if progress >= 100:
+        return False, progress, inactive
+    if inactive < 2:          # active today (0) or yesterday (1) → no reminder
+        return False, progress, inactive
+    if was_reminded_today(student):
+        return False, progress, inactive
 
-We noticed you haven’t been active recently 📚  
-You still have unfinished progress — continue your learning journey 🚀"""
+    return True, progress, inactive
 
-# ================================
-# 🔁 MAIN JOB
-# ================================
-def run_reminders():
-    print("🚀 Running reminders...")
+
+# =========================================================
+# MAIN JOB
+# =========================================================
+
+def run_reminders() -> None:
+    print(f"\n🚀 Running reminders — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     students = load_students()
+    sent = 0
+    skipped = 0
 
     for student in students:
-        if should_send_reminder(student):
+        name = student.get("student_name", student.get("student_id", "?"))
+        should, progress, inactive = should_send_reminder(student)
 
-            progress = get_progress(student["student_id"])
-            inactive_days = get_inactive_days(student.get("last_active_at", ""))
+        if not should:
+            print(f"  ⏭️  Skipped {name}")
+            skipped += 1
+            continue
 
-            if inactive_days >= 100:
-                inactive_days = "a while"
+        # Humanise large inactivity numbers in the AI prompt
+        inactive_label: int | str = inactive if inactive < 100 else "a while"
 
-            if progress < 30:
-                tone = "encourage start"
-            elif progress < 80:
-                tone = "keep going"
-            else:
-                tone = "almost done"
+        message = generate_message(student, progress, inactive_label)
+        success = send_whatsapp_message(student["phone_number"], message)
 
-            message = generate_message(student, progress, inactive_days, tone)
-
-            send_whatsapp_message(
-                student["phone_number"],
-                message
-            )
-
+        if success:
+            # Persist the send date so we don't double-send today
+            update_last_reminder_sent(student["student_id"])
+            sent += 1
         else:
-            print(f"⏭️ Skipped {student.get('student_name')}")
+            skipped += 1
 
-# ================================
-# ⏰ SCHEDULE
-# ================================
+    print(f"\n📊 Done — {sent} sent, {skipped} skipped\n")
+
+
+# =========================================================
+# SCHEDULER
+# =========================================================
+
 schedule.every().day.at("23:15").do(run_reminders)
 
-# ================================
-# 🔄 RUN
-# ================================
 if __name__ == "__main__":
-    print("⏳ Scheduler started...")
-
+    print("⏳ WhatsApp reminder scheduler started (runs daily at 23:15)...")
     while True:
         schedule.run_pending()
         time.sleep(60)
