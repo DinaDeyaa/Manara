@@ -3,9 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import re
+import difflib
 import pandas as pd
-import chromadb
-from chromadb.utils import embedding_functions
 from datetime import datetime
 
 print("studentprofile.py loaded")
@@ -20,6 +19,7 @@ BASE_DIR = Path("/Users/dinaal-memah/Desktop/graduation project 2")
 
 DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = BASE_DIR / "student_profiles"
+COURSES_DIR = BASE_DIR / "courses"
 
 PROFILES_CSV = OUTPUT_DIR / "student_profiles.csv"
 PROFILES_JSON = OUTPUT_DIR / "student_profiles.json"
@@ -117,6 +117,8 @@ def load_existing_profiles() -> pd.DataFrame:
         "phone_number",
         "whatsapp_opt_in",
         "last_active_at",
+        "activity_dates",        # pipe-delimited YYYY-MM-DD dates, newest first, max 90
+        "last_reminder_sent_at", # YYYY-MM-DD — date the last WhatsApp reminder was sent
     ]
 
     if PROFILES_CSV.exists():
@@ -138,7 +140,44 @@ def load_existing_profiles() -> pd.DataFrame:
 # =========================================================
 
 def normalize_course_name(name: str) -> str:
-    return " ".join(str(name).strip().lower().split())
+    text = str(name or "")
+    # Normalize common invisible/pasted characters that break exact matching.
+    text = text.replace("\u00a0", " ")
+    text = re.sub(r"[\u200b-\u200f\u202a-\u202e\ufeff]", "", text)
+    text = re.sub(r"[_\-]+", " ", text)
+    text = re.sub(r"\s+", " ", text.strip().lower())
+    return text
+
+
+def resolve_course_name(course_name: str, lookup: dict) -> str | None:
+    """
+    Resolve an incoming frontend label to the canonical course name accepted by
+    Manara. Exact normalized match wins; close aliases are accepted so profile
+    setup does not reject valid folder-backed courses due to spelling/casing or
+    spacing drift.
+    """
+    norm = normalize_course_name(course_name)
+    if not norm:
+        return None
+
+    if norm in lookup:
+        return lookup[norm]["official_name"]
+
+    # Substring aliases cover labels like "Discrete Mathematics (MATH-...)".
+    for valid_norm, info in lookup.items():
+        if norm == valid_norm or norm in valid_norm or valid_norm in norm:
+            return info["official_name"]
+
+    # Conservative fuzzy match for small naming drift.
+    matches = difflib.get_close_matches(norm, list(lookup.keys()), n=1, cutoff=0.88)
+    if matches:
+        return lookup[matches[0]]["official_name"]
+
+    return None
+
+
+def is_lab_course(course_name: str) -> bool:
+    return normalize_course_name(course_name).endswith(" lab")
 
 
 def parse_saved_courses(courses_text: str) -> list[str]:
@@ -212,21 +251,48 @@ def build_course_lookup(study_plan: dict) -> dict:
             "concurrent": course_info.get("concurrent", [])  
         }
 
+    # Keep profile setup aligned with the actual Manara knowledge base. Some
+    # processed course folders are not present in studyplan.json yet; they
+    # should still be selectable and storable as completed courses.
+    if COURSES_DIR.exists():
+        for course_dir in COURSES_DIR.iterdir():
+            if not course_dir.is_dir():
+                continue
+            course_name = course_dir.name.strip()
+            norm = normalize_course_name(course_name)
+            if course_name and norm not in lookup:
+                lookup[norm] = {
+                    "official_name": course_name,
+                    "course_code": "",
+                    "prerequisites": [],
+                    "concurrent": [],
+                }
+
     return lookup
 
 
 def validate_completed_courses(courses_taken: list[str], study_plan: dict) -> dict:
     lookup = build_course_lookup(study_plan)
 
-    entered_normalized = [normalize_course_name(c) for c in courses_taken]
+    resolved_incoming = []
+    for course in courses_taken:
+        official = resolve_course_name(course, lookup)
+        resolved_incoming.append(official or str(course).strip())
+
+    entered_normalized = [normalize_course_name(c) for c in resolved_incoming]
     entered_set = set(entered_normalized)
 
     unknown_courses = []
     violations = []
     valid_courses = []
 
-    for original_course in courses_taken:
-        norm_course = normalize_course_name(original_course)
+    print("[COURSE VALIDATION]")
+    print("incoming:", courses_taken)
+    print("resolved:", resolved_incoming)
+    print("valid:", sorted(info["official_name"] for info in lookup.values()))
+
+    for original_course, resolved_course in zip(courses_taken, resolved_incoming):
+        norm_course = normalize_course_name(resolved_course)
 
         if norm_course not in lookup:
             unknown_courses.append(original_course)
@@ -242,14 +308,14 @@ def validate_completed_courses(courses_taken: list[str], study_plan: dict) -> di
             if prereq_norm not in entered_set:
                 missing_prereqs.append(prereq)
 
-        # ✅ 2. STRICT LAB RULE (lab requires its main course)
-        for concurrent_course in course_info.get("concurrent", []):
-            concurrent_norm = normalize_course_name(concurrent_course)
+        # 2. LAB/COREQUISITE RULE
+        # Direction matters: labs depend on their lecture course, but lecture
+        # courses do not require the lab. A lecture-only selection is valid.
+        if is_lab_course(course_info["official_name"]):
+            for concurrent_course in course_info.get("concurrent", []):
+                concurrent_norm = normalize_course_name(concurrent_course)
 
-            # enforce: if lab is selected, its pair must also be selected
-            if concurrent_norm not in entered_set:
-                # only enforce if it's a mutual relationship (lab ↔ course)
-                if concurrent_norm in lookup:
+                if concurrent_norm not in entered_set and concurrent_norm in lookup:
                     missing_prereqs.append(concurrent_course)
 
         # ✅ 3. FINAL DECISION (after all checks)
@@ -260,6 +326,8 @@ def validate_completed_courses(courses_taken: list[str], study_plan: dict) -> di
             })
         else:
             valid_courses.append(course_info["official_name"])
+
+    print("missing:", unknown_courses)
 
     return {
         "valid_courses": valid_courses,
@@ -293,34 +361,86 @@ def get_profile_row(student_id: str, profiles_df: pd.DataFrame):
     return match.iloc[0]
 
 
+def parse_activity_dates(raw: str) -> list[str]:
+    """Parse pipe-delimited YYYY-MM-DD activity dates, deduplicate, sort newest first."""
+    parts = [p.strip() for p in str(raw or "").split("|") if p.strip()]
+    # keep only valid date strings
+    valid = []
+    for p in parts:
+        try:
+            datetime.strptime(p, "%Y-%m-%d")
+            valid.append(p)
+        except ValueError:
+            pass
+    # deduplicate, sort newest first
+    return sorted(set(valid), reverse=True)
+
+
+def stringify_activity_dates(dates: list[str]) -> str:
+    return "|".join(dates)
+
+
 def row_to_profile_dict(row) -> dict:
     return {
-        "student_id": str(row["student_id"]).strip(),
-        "student_name": str(row["student_name"]).strip(),
-        "courses_taken": parse_saved_courses(row.get("courses_taken", "")),
-        "terms_accepted": str_to_bool(row.get("terms_accepted", "")),
-        "phone_number": str(row.get("phone_number", "")).strip(),
-        "whatsapp_opt_in": str_to_bool(row.get("whatsapp_opt_in", "")),
-        "last_active_at": str(row.get("last_active_at", "")).strip(),  
+        "student_id":            str(row["student_id"]).strip(),
+        "student_name":          str(row["student_name"]).strip(),
+        "courses_taken":         parse_saved_courses(row.get("courses_taken", "")),
+        "terms_accepted":        str_to_bool(row.get("terms_accepted", "")),
+        "phone_number":          str(row.get("phone_number", "")).strip(),
+        "whatsapp_opt_in":       str_to_bool(row.get("whatsapp_opt_in", "")),
+        "last_active_at":        str(row.get("last_active_at", "")).strip(),
+        "activity_dates":        parse_activity_dates(row.get("activity_dates", "")),
+        "last_reminder_sent_at": str(row.get("last_reminder_sent_at", "")).strip(),
     }
 
 def update_last_active(student_id: str):
+    """
+    Record a learning activity event for the student:
+    - Updates last_active_at to the current timestamp
+    - Appends today's date (YYYY-MM-DD) to activity_dates
+    - Keeps only the most recent 90 unique dates (≈ 3 months of data)
+    Called on login and every meaningful learning action.
+    """
+    profiles_df = load_existing_profiles()
+    row = get_profile_row(student_id, profiles_df)
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    if row is None:
+        profile = {
+            "student_id":     student_id,
+            "student_name":   "",
+            "courses_taken":  [],
+            "terms_accepted": False,
+            "phone_number":   "",
+            "whatsapp_opt_in": False,
+            "last_active_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "activity_dates": [today],
+        }
+    else:
+        profile = row_to_profile_dict(row)
+        profile["last_active_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Prepend today, deduplicate, keep newest 90
+        existing = profile.get("activity_dates", [])
+        merged = sorted(set(existing + [today]), reverse=True)[:90]
+        profile["activity_dates"] = merged
+
+    save_student_profile(profile)
+
+
+def update_last_reminder_sent(student_id: str) -> None:
+    """
+    Record that a WhatsApp reminder was sent to this student today.
+    Writes today's date (YYYY-MM-DD) to last_reminder_sent_at so the
+    reminder system can prevent duplicate sends on the same calendar day.
+    """
     profiles_df = load_existing_profiles()
     row = get_profile_row(student_id, profiles_df)
 
     if row is None:
-        profile = {
-            "student_id": student_id,
-            "student_name": "",
-            "courses_taken": [],
-            "terms_accepted": False,
-            "phone_number": "",
-            "whatsapp_opt_in": False,
-            "last_active_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-    else:
-        profile = row_to_profile_dict(row)
+        return   # no profile to update — nothing to do
 
+    profile = row_to_profile_dict(row)
+    profile["last_reminder_sent_at"] = datetime.now().strftime("%Y-%m-%d")
     save_student_profile(profile)
 
 
@@ -330,13 +450,15 @@ def update_last_active(student_id: str):
 
 def save_student_profile(student_profile: dict):
     row = {
-        "student_id": str(student_profile["student_id"]).strip(),
-        "student_name": str(student_profile["student_name"]).strip(),
-        "courses_taken": stringify_courses(student_profile.get("courses_taken", [])),
-        "terms_accepted": to_bool_str(student_profile.get("terms_accepted", False)),
-        "phone_number": str(student_profile.get("phone_number", "")).strip(),
-        "whatsapp_opt_in": to_bool_str(student_profile.get("whatsapp_opt_in", False)),
-        "last_active_at": student_profile.get("last_active_at", ""), 
+        "student_id":            str(student_profile["student_id"]).strip(),
+        "student_name":          str(student_profile["student_name"]).strip(),
+        "courses_taken":         stringify_courses(student_profile.get("courses_taken", [])),
+        "terms_accepted":        to_bool_str(student_profile.get("terms_accepted", False)),
+        "phone_number":          str(student_profile.get("phone_number", "")).strip(),
+        "whatsapp_opt_in":       to_bool_str(student_profile.get("whatsapp_opt_in", False)),
+        "last_active_at":        student_profile.get("last_active_at", ""),
+        "activity_dates":        stringify_activity_dates(student_profile.get("activity_dates", [])),
+        "last_reminder_sent_at": str(student_profile.get("last_reminder_sent_at", "")).strip(),
     }
 
     new_df = pd.DataFrame([row])
@@ -363,20 +485,28 @@ def save_student_profile(student_profile: dict):
 
 
 def save_student_to_chroma(student_profile: dict):
-    chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-    embedding_function = embedding_functions.DefaultEmbeddingFunction()
+    try:
+        import chromadb
+        from chromadb.utils import embedding_functions
+    except Exception as exc:
+        print(f"[STUDENT CHROMA] Skipping profile vector save; Chroma import failed: {exc}")
+        return
 
-    collection = chroma_client.get_or_create_collection(
-        name=STUDENT_COLLECTION,
-        embedding_function=embedding_function
-    )
+    try:
+        chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+        embedding_function = embedding_functions.DefaultEmbeddingFunction()
 
-    student_id = str(student_profile["student_id"]).strip()
-    student_name = str(student_profile["student_name"]).strip()
-    courses_taken = student_profile.get("courses_taken", [])
-    phone_number = str(student_profile.get("phone_number", "")).strip()
+        collection = chroma_client.get_or_create_collection(
+            name=STUDENT_COLLECTION,
+            embedding_function=embedding_function
+        )
 
-    profile_text = f"""
+        student_id = str(student_profile["student_id"]).strip()
+        student_name = str(student_profile["student_name"]).strip()
+        courses_taken = student_profile.get("courses_taken", [])
+        phone_number = str(student_profile.get("phone_number", "")).strip()
+
+        profile_text = f"""
 Student ID: {student_id}
 Student Name: {student_name}
 Courses Taken: {", ".join(courses_taken)}
@@ -385,20 +515,22 @@ Phone Number: {phone_number}
 WhatsApp Opt In: {student_profile.get("whatsapp_opt_in", False)}
 """.strip()
 
-    metadata = {
-        "student_id": student_id,
-        "student_name": student_name,
-        "courses_taken_count": len(courses_taken),
-        "terms_accepted": bool(student_profile.get("terms_accepted", False)),
-        "has_phone_number": bool(phone_number),
-        "whatsapp_opt_in": bool(student_profile.get("whatsapp_opt_in", False)),
-    }
+        metadata = {
+            "student_id": student_id,
+            "student_name": student_name,
+            "courses_taken_count": len(courses_taken),
+            "terms_accepted": bool(student_profile.get("terms_accepted", False)),
+            "has_phone_number": bool(phone_number),
+            "whatsapp_opt_in": bool(student_profile.get("whatsapp_opt_in", False)),
+        }
 
-    collection.upsert(
-        ids=[student_id],
-        documents=[profile_text],
-        metadatas=[metadata]
-    )
+        collection.upsert(
+            ids=[student_id],
+            documents=[profile_text],
+            metadatas=[metadata]
+        )
+    except Exception as exc:
+        print(f"[STUDENT CHROMA] Skipping profile vector save; Chroma write failed: {exc}")
 
 
 # =========================================================
@@ -432,15 +564,19 @@ def authenticate_student(student_id: str, password: str) -> dict:
     else:
         profile = row_to_profile_dict(existing_row)
 
-    update_last_active(student_row["student_id"])  
+    # Update last_active_at and activity_dates, then reload so return value is fresh
+    update_last_active(student_row["student_id"])
+    fresh_row = get_profile_row(student_row["student_id"], load_existing_profiles())
+    fresh_profile = row_to_profile_dict(fresh_row) if fresh_row is not None else profile
 
     return {
-        "student_id": str(student_row["student_id"]).strip(),
-        "student_name": str(student_row["student_name"]).strip(),
-        "terms_accepted": profile["terms_accepted"],
-        "phone_number": profile["phone_number"],
-        "whatsapp_opt_in": profile["whatsapp_opt_in"],
-        "courses_taken": profile["courses_taken"],
+        "student_id":     str(student_row["student_id"]).strip(),
+        "student_name":   str(student_row["student_name"]).strip(),
+        "terms_accepted": fresh_profile["terms_accepted"],
+        "phone_number":   fresh_profile["phone_number"],
+        "whatsapp_opt_in": fresh_profile["whatsapp_opt_in"],
+        "courses_taken":  fresh_profile["courses_taken"],
+        "activity_dates": fresh_profile.get("activity_dates", []),
     }
 
 
