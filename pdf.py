@@ -12,6 +12,9 @@ from reportlab.lib.pagesizes import A4
 import io
 import re
 import os
+from pathlib import Path
+
+PROJECT_DIR = Path(os.environ.get("MANARA_PROJECT_DIR", "/Users/dinaal-memah/Desktop/graduation project 2"))
 
 router = APIRouter()
 
@@ -22,7 +25,7 @@ PAGE_WIDTH, PAGE_HEIGHT = A4
 def add_background(canvas, doc):
     canvas.saveState()
 
-    bg_path = r"/Users/dinaal-memah/Desktop/graduation project 2/background.png"  # 👉 YOUR CANVA IMAGE
+    bg_path = r"/Users/dinaal-memah/Desktop/graduation project 2/designs/background.png"  # 👉 YOUR CANVA IMAGE
 
     if os.path.exists(bg_path):
         canvas.drawImage(
