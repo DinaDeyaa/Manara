@@ -1449,7 +1449,7 @@ function LearningPathPage({ pathData, onExercises, onTrack, onDownloadPdf, onExi
 }
 
 /* ─────────────────────────────── ExercisesPage ─────────────────────────── */
-function ExercisesPage({ pathData, exerciseCounts, setExerciseCounts, onGenerate, exercisesData, loading, onExit }) {
+function ExercisesPage({ pathData, exerciseCounts, setExerciseCounts, exerciseDifficulties, setExerciseDifficulties, onGenerate, exercisesData, loading, onExit }) {
   const flatSubtopics = useMemo(() => {
     const rows = [];
     (pathData?.learning_path || []).forEach((step) => {
@@ -1470,30 +1470,49 @@ function ExercisesPage({ pathData, exerciseCounts, setExerciseCounts, onGenerate
       <Card className="p-8">
         <SectionTitle
           title="Generate Exercises"
-          subtitle="Enter how many exercises you want for each weak subtopic. Click 'Show Answer' to reveal solutions."
+          subtitle="Choose the exact number of questions and difficulty for each weak subtopic. Use 0 to skip."
         />
 
         <div className="mt-7 space-y-3">
           {flatSubtopics.map((item, index) => {
             const key = `${item.topic_name}|||${item.subtopic_name}|||${item.source_course || ""}`;
+            const selectedDifficulty = exerciseDifficulties[key] || "mixed";
             return (
               <div key={key} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex-1">
                     <div className="font-semibold text-slate-900">
                       <span className="text-[#f8b51b] mr-2">#{index + 1}</span>{item.subtopic_name}
                     </div>
                     <div className="mt-1 text-xs text-slate-400">{item.source_course} · {item.topic_name}</div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <label className="text-xs text-slate-500 whitespace-nowrap">No. of exercises</label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={exerciseCounts[key] ?? ""}
-                      onChange={(e) => setExerciseCounts((prev) => ({ ...prev, [key]: e.target.value }))}
-                      className="w-20 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-center outline-none focus:border-[#f8b51b] focus:ring-2 focus:ring-[#f8b51b]/20"
-                    />
+
+                  <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-[340px]">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Number of Questions</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="20"
+                        value={exerciseCounts[key] ?? ""}
+                        onChange={(e) => setExerciseCounts((prev) => ({ ...prev, [key]: e.target.value }))}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-center outline-none focus:border-[#f8b51b] focus:ring-2 focus:ring-[#f8b51b]/20"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Difficulty</label>
+                      <select
+                        value={selectedDifficulty}
+                        onChange={(e) => setExerciseDifficulties((prev) => ({ ...prev, [key]: e.target.value }))}
+                        className="w-full rounded-xl border border-[#f8b51b]/60 bg-white px-3 py-2 text-sm font-semibold text-[#071333] outline-none focus:border-[#f8b51b] focus:ring-2 focus:ring-[#f8b51b]/20"
+                      >
+                        <option value="mixed">Mixed</option>
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2620,14 +2639,18 @@ function initNodePositions(nodes) {
   });
 }
 
+function cleanCourseLabel(label) {
+  return String(label).replace(/^[A-Z]{1,4}\d{2,4}[\s\-:–]+/i, "").trim() || String(label);
+}
+
 function InsideManarasBrainPage() {
   const animFrameRef = useRef(null);
-  const tourTimer = useRef(null);
 
   const [hoveredNode, setHoveredNode] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
   const [tourActive, setTourActive] = useState(false);
   const [tourStep, setTourStep] = useState(0);
+  const [tourHovered, setTourHovered] = useState(false);
 
   // Always start with loading=true, graphReady=false
   const [loading, setLoading] = useState(true);
@@ -2798,30 +2821,53 @@ function InsideManarasBrainPage() {
   }, [graphReady, graphData.edges]);
 
   /* ── TOUR ── */
-  const tourNodes = useMemo(
-    () => graphData.nodes.filter(n => n.type === "course").slice(0, 6).map(n => n.id),
-    [graphData.nodes]
-  );
 
+  // All course nodes sorted by connection count — most connected leads the tour
+  const tourCourseNodes = useMemo(() => {
+    const courses = graphData.nodes.filter(n => n.type === "course");
+    const allEdges = graphData.edges || [];
+    return [...courses].sort((a, b) => {
+      const ca = allEdges.filter(e => e.source === a.id || e.target === a.id).length;
+      const cb = allEdges.filter(e => e.source === b.id || e.target === b.id).length;
+      return cb - ca;
+    });
+  }, [graphData.nodes, graphData.edges]);
+
+  const tourFeaturedNodeId = tourActive ? (tourCourseNodes[tourStep]?.id ?? null) : null;
+
+  // Connected COURSE neighbours — use all edges, not the filtered subset
+  const tourConnectedCourses = useMemo(() => {
+    if (!tourFeaturedNodeId) return [];
+    const allEdges = graphData.edges || [];
+    const seen = new Set();
+    const result = [];
+    allEdges.forEach(e => {
+      if (e.source !== tourFeaturedNodeId && e.target !== tourFeaturedNodeId) return;
+      const neighborId = e.source === tourFeaturedNodeId ? e.target : e.source;
+      if (seen.has(neighborId)) return;
+      seen.add(neighborId);
+      const nb = graphData.nodes.find(n => n.id === neighborId && n.type === "course");
+      if (nb) result.push(nb);
+    });
+    return result.slice(0, 8);
+  }, [tourFeaturedNodeId, graphData.edges, graphData.nodes]);
+
+  // Keep selectedNode in sync so existing glow/dimming logic fires automatically
   useEffect(() => {
-    if (!tourActive || !tourNodes.length) return;
-    tourTimer.current = setInterval(() => {
-      setTourStep(s => {
-        const next = s + 1;
-        if (next >= tourNodes.length) { setTourActive(false); setSelectedNode(null); return 0; }
-        setSelectedNode(tourNodes[next]);
-        return next;
-      });
-    }, 2800);
-    return () => clearInterval(tourTimer.current);
-  }, [tourActive, tourNodes.join("|")]);
+    if (tourActive) setSelectedNode(tourFeaturedNodeId);
+  }, [tourActive, tourFeaturedNodeId]);
 
-  const startTour = () => {
-    if (!tourNodes.length) return;
-    setTourActive(true);
-    setTourStep(0);
-    setSelectedNode(tourNodes[0]);
-  };
+  const startTour = () => { setTourActive(true); setTourStep(0); };
+  const stopTour  = () => { setTourActive(false); setTourStep(0); setSelectedNode(null); };
+
+  // Auto-advance: loop every 4.5 s, pause while card is hovered
+  useEffect(() => {
+    if (!tourActive || tourHovered || tourCourseNodes.length === 0) return;
+    const timer = setInterval(() => {
+      setTourStep(s => (s + 1) % tourCourseNodes.length);
+    }, 4500);
+    return () => clearInterval(timer);
+  }, [tourActive, tourHovered, tourCourseNodes.length]);
 
   /* ── COLORS ── */
   const nodeColor = (n) => {
@@ -2917,18 +2963,79 @@ function InsideManarasBrainPage() {
       )}
 
       {/* Tour overlay */}
-      {tourActive && selectedNodeData && (
-        <motion.div
-          key={selectedNodeData.id}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-2xl border border-[#f8b51b]/30 bg-[#071333]/90 px-5 py-4 text-sm backdrop-blur-sm"
-        >
-          <div className="text-[#f8b51b] text-xs font-bold uppercase tracking-wider mb-1">Guided Tour · {tourStep + 1}/{tourNodes.length}</div>
-          <div className="text-white font-semibold">{selectedNodeData.label}</div>
-          <div className="text-white/50 text-xs mt-1">{selectedNodeData.desc || "Part of Manara's semantic academic knowledge graph."}</div>
-        </motion.div>
-      )}
+      {tourActive && tourCourseNodes.length > 0 && (() => {
+        const featured = tourCourseNodes[tourStep];
+        const featuredLabel = featured ? cleanCourseLabel(featured.label) : "";
+        const connectedNames = tourConnectedCourses.map(c => cleanCourseLabel(c.label));
+        const sentence = connectedNames.length === 0
+          ? null
+          : connectedNames.length === 1
+            ? `${featuredLabel} is connected to ${connectedNames[0]}.`
+            : `${featuredLabel} is connected to ${connectedNames.slice(0, -1).join(", ")}, and ${connectedNames[connectedNames.length - 1]}.`;
+        return (
+          <motion.div
+            key={tourStep}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="rounded-2xl border border-[#f8b51b]/25 overflow-hidden"
+            style={{ background: "#060f28", boxShadow: "0 0 30px rgba(248,181,27,0.08)" }}
+            onMouseEnter={() => setTourHovered(true)}
+            onMouseLeave={() => setTourHovered(false)}
+          >
+            {/* Progress bar */}
+            <div className="h-0.5" style={{ background: "rgba(255,255,255,0.04)" }}>
+              <div
+                className="h-0.5 transition-all duration-500"
+                style={{
+                  width: `${((tourStep + 1) / tourCourseNodes.length) * 100}%`,
+                  background: "linear-gradient(90deg,#f8b51b,#ffd56b)",
+                }}
+              />
+            </div>
+
+            <div className="px-5 py-4">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[#f8b51b] text-[10px] font-bold uppercase tracking-[0.18em]">
+                  Guided Tour · {tourStep + 1}/{tourCourseNodes.length}
+                </span>
+                <button
+                  onClick={stopTour}
+                  className="text-[11px] text-white/25 hover:text-white/55 transition-colors leading-none"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Connection sentence */}
+              {sentence ? (
+                <p className="text-white/80 text-sm leading-relaxed">
+                  {sentence}
+                </p>
+              ) : (
+                <p className="text-white/25 text-xs italic">No direct course connections in graph.</p>
+              )}
+
+              {/* Progress dots */}
+              <div className="flex items-center justify-center gap-1.5 mt-4">
+                {tourCourseNodes.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setTourStep(i)}
+                    className="rounded-full transition-all duration-200"
+                    style={{
+                      width: i === tourStep ? 16 : 5,
+                      height: 5,
+                      background: i === tourStep ? "#f8b51b" : "rgba(255,255,255,0.15)",
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        );
+      })()}
 
       {/* Graph canvas */}
       <div className="relative rounded-3xl overflow-hidden" style={{ background: "linear-gradient(135deg,#020a1a,#071333)" }}>
@@ -2961,9 +3068,6 @@ function InsideManarasBrainPage() {
         <div className="absolute top-4 left-4 z-20 flex gap-3">
           <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-xs text-white/60 backdrop-blur-sm">
             <span className="h-2 w-2 rounded-full bg-[#1a3a7a]" /> Courses
-          </div>
-          <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-xs text-white/60 backdrop-blur-sm">
-            <span className="h-2 w-2 rounded-full bg-[#2563eb]" /> Topics
           </div>
           <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-xs text-white/60 backdrop-blur-sm">
             <span className="h-2 w-2 rounded-full bg-[#f8b51b]" /> Selected
@@ -3176,6 +3280,7 @@ export default function App() {
 
   const [exercisesLoading, setExercisesLoading] = useState(false);
   const [exerciseCounts, setExerciseCounts] = useState({});
+  const [exerciseDifficulties, setExerciseDifficulties] = useState({});
   const [exercisesData, setExercisesData] = useState(null);
 
   const [termsLoading, setTermsLoading] = useState(false);
@@ -3348,7 +3453,13 @@ export default function App() {
       .filter(([, value]) => Number(value) > 0)
       .map(([key, value]) => {
         const [topic_name, subtopic_name, source_course] = key.split("|||");
-        return { topic_name, subtopic_name, source_course: source_course || "", num_exercises: Number(value) };
+        return {
+          topic_name,
+          subtopic_name,
+          source_course: source_course || "",
+          num_exercises: Number(value),
+          difficulty: exerciseDifficulties[key] || "mixed",
+        };
       });
     const data = await api("/generate-exercises", {
       method: "POST",
@@ -3464,7 +3575,7 @@ export default function App() {
     setScreen("login"); setSidebarTab("home"); setStudent(null); setTermsAccepted(false);
     setPhone(""); setSelectedCourses([]); setSelectedTargetCourse(""); setDiagnosticExam(null);
     setDiagnosticAnswers({}); setDiagnosticResult(null); setLearningPath(null); setExercisesData(null);
-    setExerciseCounts({}); setAskCourseState({ course: "", question: "", chat: [] }); setProgressData([]);
+    setExerciseCounts({}); setExerciseDifficulties({}); setAskCourseState({ course: "", question: "", chat: [] }); setProgressData([]);
     setQbState({ course: "", chapter: "", chapters: [], questions: [] }); setLoginValues({ id: "", password: "" });
     setLoginError(""); setTrackingQuiz(null); setTrackingResult(null); setTrackingAnswers({});
     setTrackingLoading(false); setSelectedProgressCourse(null); setTrackingDetails(null); setOptIn(false);
@@ -3478,6 +3589,8 @@ export default function App() {
           pathData={learningPath}
           exerciseCounts={exerciseCounts}
           setExerciseCounts={setExerciseCounts}
+          exerciseDifficulties={exerciseDifficulties}
+          setExerciseDifficulties={setExerciseDifficulties}
           onGenerate={generateExercises}
           exercisesData={exercisesData}
           loading={exercisesLoading}
