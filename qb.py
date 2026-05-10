@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
-from openai import OpenAI
 from chromadb.utils import embedding_functions
 
 
@@ -17,11 +16,12 @@ from chromadb.utils import embedding_functions
 # CONFIG
 # =========================================================
 
-PROJECT_DIR = Path("/Users/dinaal-memah/Desktop/graduation project 2")
+PROJECT_DIR = Path(os.environ.get("MANARA_PROJECT_DIR", "/Users/dinaal-memah/Desktop/graduation project 2"))
 COURSES_DIR = PROJECT_DIR / "courses"
 QB_RESULTS_DIR = PROJECT_DIR / "question_bank_results"
 
 MODEL_NAME = "gpt-5.4-nano"
+
 MAX_COMPLETION_TOKENS = 2500
 
 DIFFICULTY_DISTRIBUTION = {
@@ -30,11 +30,64 @@ DIFFICULTY_DISTRIBUTION = {
     "hard": 0.30,
 }
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY is not set in your environment.")
+_openai_client = None
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+def get_llm_client():
+    global _openai_client
+    if _openai_client is None:
+        key = os.getenv("OPENAI_API_KEY")
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY is not set.")
+        from openai import OpenAI
+        _openai_client = OpenAI(api_key=key)
+    return _openai_client
+
+
+# =========================================================
+# MATH COMPLETENESS — DETECTION + TARGETED RULES
+# =========================================================
+
+# Keywords that indicate the subtopic requires evaluating math to a number.
+_EVAL_MATH_KEYWORDS = {
+    "telescoping", "geometric series", "convergence", "divergence",
+    "partial sum", "limit", "improper integral", "ratio test", "root test",
+    "comparison test", "integral test", "series sum", "sum of series",
+    "evaluate", "compute", "find the sum", "find the limit", "lim",
+    "infty", "infinity", "sigma notation",
+}
+
+def requires_evaluated_answer(subtopic_name: str, topic_name: str, context_text: str = "") -> bool:
+    """Return True when the subtopic involves computing a numeric answer from a limit/series/integral."""
+    combined = (subtopic_name + " " + topic_name + " " + context_text[:500]).lower()
+    return any(kw in combined for kw in _EVAL_MATH_KEYWORDS)
+
+
+def build_math_completeness_block(subtopic_name: str, topic_name: str, context_text: str = "") -> str:
+    """
+    Return targeted math-completeness instructions only when the subtopic
+    actually requires evaluating a limit, series, or integral to a number.
+    For definition/concept questions the block is empty — it would only confuse
+    the model and produce wrong "therefore = 2" conclusions on definition questions.
+    """
+    if not requires_evaluated_answer(subtopic_name, topic_name, context_text):
+        return ""
+
+    return (
+        "CRITICAL -- MATHEMATICAL COMPLETENESS FOR THIS QUESTION:\n"
+        "This subtopic requires COMPUTING a numeric result. You MUST fully evaluate all expressions.\n\n"
+        "RULE: Never stop at an unevaluated expression like:\n"
+        "  $\\lim_{N\\to\\infty}\\left(2 - \\frac{2}{2N+1}\\right)$  followed by \"tends to 0\"\n\n"
+        "INSTEAD always chain through to the final number:\n"
+        "  $= 2 - 0 = 2$\n\n"
+        "and conclude the explanation with:\n"
+        "  $\\therefore \\text{[original expression]} = \\text{[final numeric value]}.$\n\n"
+        "This applies to:\n"
+        "- Telescoping series: show S_N simplified -> take limit -> state = [number]\n"
+        "- Geometric series: substitute into a/(1-r) -> state = [number]\n"
+        "- Improper integrals: evaluate the antiderivative limit -> state = [number] or = infinity\n"
+        "- Limit problems: substitute/simplify -> state = [number]\n\n"
+        "The explanation field in your JSON MUST end with the fully evaluated numeric answer.\n"
+    )
 
 
 # =========================================================
@@ -56,21 +109,38 @@ def extract_json_block(text: str):
     if not match:
         return None
 
+    raw = match.group(0)
+
+    # ── Repair invalid JSON escape sequences produced by LLMs ────────────────
+    # LLMs emit LaTeX like \( \) \frac \sum inside JSON string values.
+    # These are not valid JSON escape sequences and cause json.loads to fail.
+    # Valid JSON escapes are only: \" \\ \/ \b \f \n \r \t \uXXXX
+    # So replace any \X where X is not one of those with \\X.
+    def repair_json_escapes(s: str) -> str:
+        return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', s)
+
     try:
-        return json.loads(match.group(0))
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    try:
+        return json.loads(repair_json_escapes(raw))
     except Exception:
         return None
 
 
 def ask_llm(prompt: str) -> str:
-    response = client.chat.completions.create(
+    response = get_llm_client().chat.completions.create(
         model=MODEL_NAME,
         messages=[
             {
                 "role": "system",
                 "content": (
-                    "You are a precise academic assistant. "
-                    "Return clean structured output only."
+                    "You are a precise academic question-bank generator. "
+                    "Return clean structured JSON output only. "
+                    "When a question involves computing a limit, series sum, or integral, "
+                    "always evaluate it to a final numeric value — never stop mid-evaluation."
                 ),
             },
             {
@@ -78,7 +148,6 @@ def ask_llm(prompt: str) -> str:
                 "content": prompt,
             },
         ],
-        temperature=0.5,
         max_completion_tokens=MAX_COMPLETION_TOKENS,
     )
     return response.choices[0].message.content.strip()
@@ -523,6 +592,94 @@ def choose_question_type(index: int, total: int, has_code: bool) -> str:
 # QUESTION GENERATION
 # =========================================================
 
+def _explanation_seems_incomplete(explanation: str, subtopic_name: str, topic_name: str) -> bool:
+    """
+    Heuristic: an explanation is incomplete if it's about a computable math topic
+    but ends without a final numeric value (just a limit expression or "tends to 0" text).
+    """
+    if not requires_evaluated_answer(subtopic_name, topic_name):
+        return False  # Definition/concept questions don't need numeric endings
+
+    text = explanation.lower()
+
+    # Signs the explanation stopped mid-evaluation
+    incomplete_endings = [
+        "tends to 0",
+        "approaches 0",
+        "goes to 0",
+        "goes to zero",
+        "tends to zero",
+        "approaches zero",
+        "approaches infinity",
+        "tends to infinity",
+        "diverges to infinity",
+    ]
+    for phrase in incomplete_endings:
+        if explanation.lower().rstrip(". ").endswith(phrase):
+            return True
+
+    # Ends with an unevaluated lim expression (LaTeX) rather than a concrete number
+    import re
+    if re.search(r"\\lim[^=]*$", explanation.strip()):
+        return True
+
+    return False
+
+
+def _repair_explanation(
+    explanation: str,
+    question: str,
+    subtopic_name: str,
+    topic_name: str,
+    context_text: str,
+) -> str:
+    """
+    Fire a second LLM call ONLY when the explanation looks incomplete.
+    Ask the model specifically to finish the evaluation and append the final value.
+    """
+    repair_prompt = f"""The following math explanation stops before reaching the final numeric answer.
+Complete it by chaining through to the final evaluated result.
+
+Subtopic: {subtopic_name}
+Topic: {topic_name}
+
+Incomplete explanation:
+{explanation}
+
+Original question context:
+{question}
+
+Rules:
+- Add the missing evaluation steps immediately after the incomplete ending.
+- Show each step: = [intermediate] = [final number].
+- End with: $\\therefore \\text{{[expression]}} = \\text{{[value]}}.$
+- Do NOT rewrite the whole explanation — only append the missing final steps.
+- Return ONLY the completed explanation text, no JSON wrapper.
+"""
+    try:
+        response = get_llm_client().chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a math editor. Complete incomplete limit/series evaluations "
+                        "by appending the missing final numeric steps. Be concise and precise."
+                    ),
+                },
+                {"role": "user", "content": repair_prompt},
+            ],
+            max_completion_tokens=400,
+        )
+        repaired = response.choices[0].message.content.strip()
+        # Sanity check: repaired must be longer (added something)
+        if len(repaired) > len(explanation):
+            return repaired
+    except Exception:
+        pass
+    return explanation  # Fall back to original if repair fails
+
+
 def generate_question_for_subtopic(
     target_course: str,
     chapter_name: str,
@@ -546,6 +703,9 @@ DO NOT REPEAT any of these previously generated questions for this student in th
 If a new question is too similar in wording or meaning to any of the above, do NOT use it.
 """
 
+    # Build context-aware math completeness instructions (empty for concept questions)
+    math_block = build_math_completeness_block(subtopic_name, topic_name, context_text)
+
     prompt = f"""
 You are generating a question bank question for a university course.
 
@@ -557,18 +717,16 @@ IMPORTANT RULES:
 - The question must clearly belong to the given subtopic.
 - You MUST generate this exact question type: {required_question_type}
 
-- If the question contains math, use valid LaTeX formatting.
-- Wrap inline math with $...$.
-- Wrap displayed equations with $$...$$.
-- Use symbols like \sum, \lim, \infty (NOT plain text).
-- Always escape LaTeX with double backslashes.
--Example: $\\sum_{{n=1}}^{{\\infty}} a_n$
--NOT: $\\sum_{{n=1}}^{{\\infty}} a_n$
-- ALWAYS wrap math expressions with $...$
-- NEVER output raw LaTeX like s_n or \sum without $
+MATH FORMATTING RULES:
+- Wrap ALL inline math with $...$  (e.g. $x^2 + y^2 = z^2$).
+- Wrap ALL displayed/block equations with $$...$$ on their own line.
+- Use LaTeX commands: \\sum, \\lim, \\infty, \\frac{{a}}{{b}}, \\int, \\to, \\therefore.
+- NEVER write raw math without delimiters (e.g. never write s_n or \\sum without $).
+- Always double-escape backslashes in JSON strings (e.g. \\sum inside a JSON value).
+{math_block}
 {banned_block}
 
-Return JSON in this exact format:
+Return ONLY a JSON object in this exact format (no markdown, no extra text):
 {{
   "question_type": "{required_question_type}",
   "question": "...",
@@ -586,14 +744,15 @@ Return JSON in this exact format:
 
 Rules for fields:
 - If question_type = multiple_choice:
-  - must include options A/B/C/D
-  - must include correct_answer as A/B/C/D
-  - answer_text can be empty
+  - must include options A, B, C, D
+  - must include correct_answer as one of: A, B, C, D
+  - answer_text can be empty string
 - If question_type = essay or coding:
   - options must be {{}}
-  - correct_answer can be ""
-  - answer_text must contain the model answer / expected answer
-- explanation should always exist
+  - correct_answer must be ""
+  - answer_text must contain the full model answer
+- explanation must always be present. If this subtopic involves computing a limit,
+  series sum, or integral, the explanation MUST end with the final evaluated numeric value.
 
 Target course: {target_course}
 Chapter: {chapter_name}
@@ -638,6 +797,16 @@ COURSE MATERIAL:
 
     if result_difficulty not in {"easy", "medium", "hard"}:
         raise ValueError(f"Invalid difficulty for subtopic: {subtopic_name}")
+
+    # ── Post-generation repair: catch incomplete evaluations ──────────────────
+    if _explanation_seems_incomplete(explanation, subtopic_name, topic_name):
+        explanation = _repair_explanation(
+            explanation=explanation,
+            question=question,
+            subtopic_name=subtopic_name,
+            topic_name=topic_name,
+            context_text=context_text,
+        )
 
     cleaned = {
         "question_type": question_type,
