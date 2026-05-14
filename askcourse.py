@@ -388,15 +388,19 @@ def load_course_collections(course_name: str) -> dict:
     }
 
 
-def query_collection(collection, query: str, k: int):
+def query_collection(collection, query: str, k: int) -> tuple[list, list, list]:
+    """Returns (docs, metas, distances). distances is [] when unavailable."""
     if collection is None:
-        return [], []
+        return [], [], []
 
     try:
         res = collection.query(query_texts=[query], n_results=k)
-        return res.get("documents", [[]])[0], res.get("metadatas", [[]])[0]
+        docs      = res.get("documents", [[]])[0]
+        metas     = res.get("metadatas", [[]])[0]
+        distances = res.get("distances", [[]])[0]
+        return docs, metas, distances
     except Exception:
-        return [], []
+        return [], [], []
 
 
 def _enrich_query(question: str, history: list[dict]) -> str:
@@ -458,12 +462,66 @@ def retrieve_context(course_name: str, query: str) -> dict:
 def build_context_text(retrieved: dict) -> str:
     parts = []
 
-    for key, (docs, metas) in retrieved.items():
+    for key, (docs, metas, _distances) in retrieved.items():
         for doc, meta in zip(docs, metas):
             label = meta.get("relative_path") or key
             parts.append(f"[{label}]\n{doc}")
 
     return "\n\n".join(parts).strip()
+
+
+# =========================================================
+# RELEVANCE GATING
+# ─────────────────────────────────────────────────────────
+# ChromaDB always returns top-k nearest neighbours regardless of
+# how poor the match is.  Two complementary gates prevent
+# irrelevant sources from appearing:
+#
+#   1. Pre-LLM distance gate  — if the best matching document is
+#      further than RELEVANCE_DISTANCE_THRESHOLD the query is
+#      off-topic; skip the LLM call entirely.
+#
+#   2. Post-LLM answer gate   — if the LLM signals "not found"
+#      in its answer, strip sources and return a clean message.
+#
+# Distances are L2 on unit vectors (range [0, 2]):
+#   0.0  = identical   |  ~1.0 = ~50% cosine sim  |  1.414 = orthogonal
+# A threshold of 1.30 corresponds to cosine similarity ≈ 0.15,
+# catching clearly off-topic queries while never blocking real ones.
+# =========================================================
+
+RELEVANCE_DISTANCE_THRESHOLD = 1.30
+
+_NOT_FOUND_ANSWER = "This topic was not found in the selected course material."
+
+_NOT_FOUND_RE = re.compile(
+    r"not\s+found"
+    r"|not\s+in\s+the\s+(provided\s+)?course\s+material"
+    r"|not\s+covered"
+    r"|cannot\s+find"
+    r"|no\s+information\s+(about|on)"
+    r"|not\s+mentioned"
+    r"|not\s+discussed"
+    r"|not\s+addressed"
+    r"|isn[''`]?t\s+covered"
+    r"|does\s+not\s+(appear|exist)\s+in"
+    r"|outside\s+the\s+scope"
+    r"|no\s+relevant\s+(information|content|material)",
+    re.IGNORECASE,
+)
+
+
+def _min_retrieval_distance(retrieved: dict) -> float:
+    """Return the smallest L2 distance across all retrieved collections."""
+    all_distances: list[float] = []
+    for _docs, _metas, distances in retrieved.values():
+        all_distances.extend(d for d in distances if isinstance(d, (int, float)))
+    return min(all_distances) if all_distances else 0.0
+
+
+def _answer_is_not_found(answer: str) -> bool:
+    """Return True when the LLM answer signals the topic is absent from the material."""
+    return bool(_NOT_FOUND_RE.search(answer))
 
 
 def build_prompt(course_name: str, question: str, context: str, arabic: bool) -> str:
@@ -524,7 +582,7 @@ def clean_answer(text: str) -> str:
 def build_grouped_sources(retrieved: dict, resolved_course: str) -> list[dict]:
     grouped_sources = {}
 
-    for _, metas in retrieved.values():
+    for _, metas, _distances in retrieved.values():
         for meta in metas:
             course = meta.get("course_name") or resolved_course
             file_name = meta.get("relative_path") or meta.get("file_name") or ""
@@ -668,12 +726,25 @@ def ask_course_question(
         context = build_context_text(retrieved)
 
         if not context:
-            not_found_answer = "I could not find this in the provided course material."
             if using_store:
-                chat_store.append_turn(chat_id, question, not_found_answer)
+                chat_store.append_turn(chat_id, question, _NOT_FOUND_ANSWER)
             return {
                 "success": True,
-                "answer": not_found_answer,
+                "answer": _NOT_FOUND_ANSWER,
+                "sources": [],
+                "chat_id": chat_id or "",
+            }
+
+        # ── Pre-LLM relevance gate ─────────────────────────────────────────
+        # If the closest retrieved document is further than the threshold the
+        # query is off-topic for this course.  Skip the LLM call entirely —
+        # no tokens wasted, no irrelevant sources shown.
+        if _min_retrieval_distance(retrieved) > RELEVANCE_DISTANCE_THRESHOLD:
+            if using_store:
+                chat_store.append_turn(chat_id, question, _NOT_FOUND_ANSWER)
+            return {
+                "success": True,
+                "answer": _NOT_FOUND_ANSWER,
                 "sources": [],
                 "chat_id": chat_id or "",
             }
@@ -713,6 +784,21 @@ def ask_course_question(
         )
 
         answer = clean_answer(response.choices[0].message.content)
+
+        # ── Post-LLM answer gate ───────────────────────────────────────────
+        # Even when the distance gate passes (borderline relevance), the LLM
+        # is the authoritative signal.  If it says "not found", standardise
+        # the message and return no sources — never show misleading citations.
+        if _answer_is_not_found(answer):
+            if using_store:
+                chat_store.append_turn(chat_id, question, _NOT_FOUND_ANSWER)
+            return {
+                "success": True,
+                "answer": _NOT_FOUND_ANSWER,
+                "sources": [],
+                "chat_id": chat_id or "",
+            }
+
         formatted_sources = build_grouped_sources(retrieved, resolved)
 
         # ── Persist this turn back into the session store ──────────────────
