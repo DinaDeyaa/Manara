@@ -111,6 +111,7 @@ try:
         generate_questions_from_semantic_cluster,
         diagnostic_subtopic_key,
         diagnostic_subtopic_key_from_question,
+        force_correct_answer_a,
         is_exam_concept_duplicate,
         classify_readiness_skill_family,
         validate_diagnostic_question_quality,
@@ -1402,12 +1403,16 @@ def generate_diagnostic_exam(
 
     formatted = []
     for i, q in enumerate(selected):
+        options, correct_answer = force_correct_answer_a(
+            dict(q.get("options", {})),
+            q.get("correct_answer", "A"),
+        )
         formatted.append({
             "question_id":          f"q{i + 1}",
             "question":             q.get("question", ""),
             "difficulty":           q.get("difficulty", "medium"),
-            "options":              q.get("options", {}),
-            "correct_answer":       q.get("correct_answer", "A"),
+            "options":              options,
+            "correct_answer":       correct_answer,
             "explanation":          q.get("explanation", ""),
             "source_topic_name":    q.get("source_topic_name", ""),
             "source_subtopic_name": q.get("source_subtopic_name", ""),  # CRITICAL field
