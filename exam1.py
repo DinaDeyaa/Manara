@@ -40,6 +40,10 @@ DIFFICULTY_DISTRIBUTION = {
     "hard": 3,
 }
 
+# Temporary thesis-defense demo mode. Set MANARA_DEMO_FORCE_CORRECT_ANSWER_A=0
+# after the demo to restore distributed answer labels for mini quizzes.
+DEMO_FORCE_CORRECT_ANSWER_A = os.getenv("MANARA_DEMO_FORCE_CORRECT_ANSWER_A", "1").strip().lower() not in {"0", "false", "no", "off"}
+
 _openai_client = None
 _openai_client_key_fingerprint = None
 
@@ -2199,6 +2203,16 @@ def _assign_correct_answers(questions: list[dict]) -> list[dict]:
     all-A.  Cycles A→B→C→D→A… and swaps option content so correctness is
     preserved.
     """
+    if DEMO_FORCE_CORRECT_ANSWER_A:
+        result = []
+        for q in questions:
+            options, correct = force_correct_answer_a(
+                dict(q.get("options", {})),
+                q.get("correct_answer", "A"),
+            )
+            result.append({**q, "options": options, "correct_answer": correct})
+        return result
+
     cycle = ["A", "B", "C", "D"]
     result = []
     for i, q in enumerate(questions):
@@ -2555,12 +2569,8 @@ def generate_questions_for_subtopic(
     6. Heal the difficulty distribution, distribute answer labels
        A/B/C/D evenly, strip diagnostic metadata before returning.
     """
+    MINIMUM_QUESTIONS = 3
     MAX_DEPTH = 1
-    if _depth >= MAX_DEPTH:
-        raise ValueError(
-            f"Could not generate {QUESTIONS_PER_SUBTOPIC} unique questions "
-            f"for subtopic '{subtopic_name}' after {MAX_DEPTH} full retries."
-        )
 
     # ── Step 1: Extract concept nodes ─────────────────────────────────────
     # Request more nodes than needed so we have spares if some fail generation.
@@ -2617,18 +2627,33 @@ def generate_questions_for_subtopic(
 
     # ── Step 4: Fallback if we're short ───────────────────────────────────
     if len(accepted) < QUESTIONS_PER_SUBTOPIC:
-        print(
-            f"WARNING: Only generated {len(accepted)}/{QUESTIONS_PER_SUBTOPIC} "
-            f"questions from concept nodes.  Retrying (depth {_depth + 1})."
-        )
-        return generate_questions_for_subtopic(
-            course_name=course_name,
-            topic_name=topic_name,
-            subtopic_name=subtopic_name,
-            context_text=context_text,
-            previous_question_texts=previous_question_texts,
-            _depth=_depth + 1,
-        )
+        if _depth < MAX_DEPTH:
+            print(
+                f"WARNING: Only generated {len(accepted)}/{QUESTIONS_PER_SUBTOPIC} "
+                f"questions from concept nodes.  Retrying (depth {_depth + 1})."
+            )
+            return generate_questions_for_subtopic(
+                course_name=course_name,
+                topic_name=topic_name,
+                subtopic_name=subtopic_name,
+                context_text=context_text,
+                previous_question_texts=previous_question_texts,
+                _depth=_depth + 1,
+            )
+        # Retries exhausted — reduce target count gracefully before giving up
+        for fallback_count in [8, 5, 3]:
+            if len(accepted) >= fallback_count:
+                print(
+                    f"INFO: Limited content — reducing to {fallback_count} questions "
+                    f"for '{subtopic_name}' (had {len(accepted)} unique questions)."
+                )
+                accepted = accepted[:fallback_count]
+                break
+        else:
+            raise ValueError(
+                f"Could not generate at least {MINIMUM_QUESTIONS} unique questions "
+                f"for subtopic '{subtopic_name}'. Only {len(accepted)} could be produced."
+            )
 
     # ── Step 5: Finalise ──────────────────────────────────────────────────
     final = accepted[:QUESTIONS_PER_SUBTOPIC]
@@ -3023,27 +3048,39 @@ def generate_quiz_for_current_subtopic(student_profile: dict, target_course: str
             "message": "No material found for this subtopic.",
         }
 
-    questions = generate_questions_for_subtopic(
-        course_name=course_name,
-        topic_name=topic_name,
-        subtopic_name=subtopic_name,
-        context_text=context_text,
-        previous_question_texts=entry.get("question_history", []),
-    )
+    try:
+        questions = generate_questions_for_subtopic(
+            course_name=course_name,
+            topic_name=topic_name,
+            subtopic_name=subtopic_name,
+            context_text=context_text,
+            previous_question_texts=entry.get("question_history", []),
+        )
+    except ValueError as e:
+        return {"success": False, "message": str(e)}
+
+    quiz_note = None
+    if len(questions) < QUESTIONS_PER_SUBTOPIC:
+        quiz_note = (
+            f"Limited content found for this topic. "
+            f"A smaller personalized quiz of {len(questions)} questions was generated."
+        )
 
     progress_data["active_quiz"] = {
         "course_name": course_name,
         "topic_name": topic_name,
         "subtopic_name": subtopic_name,
         "questions": questions,
+        "quiz_note": quiz_note,
     }
     save_progress(progress_data)
 
     return {
         "success": True,
-        "message": "Quiz generated successfully.",
+        "message": quiz_note or "Quiz generated successfully.",
         "completed": False,
         "active_quiz": progress_data["active_quiz"],
+        "quiz_note": quiz_note,
         "progress_percent": progress_data.get("progress_percent", 0),
         "completed_count": progress_data.get("completed_count", 0),
         "total_subtopics": len(progress_data.get("subtopic_progress", [])),
@@ -3096,14 +3133,17 @@ def submit_quiz_for_current_subtopic(
             "explanation": q["explanation"],
         })
 
-    passed = score > PASS_MARK
+    max_score = len(active_quiz["questions"])
+    # Scale pass threshold proportionally (original: need >6/10 = 60% threshold)
+    scaled_pass_mark = max(1, int(max_score * 0.6))
+    passed = score > scaled_pass_mark
 
     entry["attempt_count"] += 1
     entry["best_score"] = max(entry.get("best_score", 0), score)
     entry["question_history"].extend([q["question"] for q in active_quiz["questions"]])
     entry["attempts"].append({
         "score": score,
-        "max_score": 10,
+        "max_score": max_score,
         "passed": passed,
         "questions": question_records,
     })
@@ -3124,7 +3164,7 @@ def submit_quiz_for_current_subtopic(
         "message": "Quiz submitted successfully.",
         "passed": passed,
         "score": score,
-        "max_score": 10,
+        "max_score": max_score,
         "questions_review": question_records,
         "progress_percent": progress_data.get("progress_percent", 0),
         "completed_count": progress_data.get("completed_count", 0),
