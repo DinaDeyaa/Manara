@@ -33,6 +33,10 @@ DIFFICULTY_DISTRIBUTION = {
     "hard": 3,
 }
 
+# Temporary thesis-defense demo mode. Set MANARA_DEMO_FORCE_CORRECT_ANSWER_A=0
+# after the demo to restore distributed answer labels for mini quizzes.
+DEMO_FORCE_CORRECT_ANSWER_A = os.getenv("MANARA_DEMO_FORCE_CORRECT_ANSWER_A", "1").strip().lower() not in {"0", "false", "no", "off"}
+
 _openai_client = None
 
 def get_llm_client():
@@ -646,6 +650,16 @@ def _assign_correct_answers(questions: list[dict]) -> list[dict]:
     all-A.  Cycles A→B→C→D→A… and swaps option content so correctness is
     preserved.
     """
+    if DEMO_FORCE_CORRECT_ANSWER_A:
+        result = []
+        for q in questions:
+            options, correct = force_correct_answer_a(
+                dict(q.get("options", {})),
+                q.get("correct_answer", "A"),
+            )
+            result.append({**q, "options": options, "correct_answer": correct})
+        return result
+
     cycle = ["A", "B", "C", "D"]
     result = []
     for i, q in enumerate(questions):
@@ -850,12 +864,8 @@ def generate_questions_for_subtopic(
     6. Heal the difficulty distribution, distribute answer labels
        A/B/C/D evenly, strip diagnostic metadata before returning.
     """
+    MINIMUM_QUESTIONS = 3
     MAX_DEPTH = 3
-    if _depth >= MAX_DEPTH:
-        raise ValueError(
-            f"Could not generate {QUESTIONS_PER_SUBTOPIC} unique questions "
-            f"for subtopic '{subtopic_name}' after {MAX_DEPTH} full retries."
-        )
 
     # ── Step 1: Extract concept nodes ─────────────────────────────────────
     # Request more nodes than needed so we have spares if some fail generation.
@@ -912,18 +922,33 @@ def generate_questions_for_subtopic(
 
     # ── Step 4: Fallback if we're short ───────────────────────────────────
     if len(accepted) < QUESTIONS_PER_SUBTOPIC:
-        print(
-            f"WARNING: Only generated {len(accepted)}/{QUESTIONS_PER_SUBTOPIC} "
-            f"questions from concept nodes.  Retrying (depth {_depth + 1})."
-        )
-        return generate_questions_for_subtopic(
-            course_name=course_name,
-            topic_name=topic_name,
-            subtopic_name=subtopic_name,
-            context_text=context_text,
-            previous_question_texts=previous_question_texts,
-            _depth=_depth + 1,
-        )
+        if _depth < MAX_DEPTH:
+            print(
+                f"WARNING: Only generated {len(accepted)}/{QUESTIONS_PER_SUBTOPIC} "
+                f"questions from concept nodes.  Retrying (depth {_depth + 1})."
+            )
+            return generate_questions_for_subtopic(
+                course_name=course_name,
+                topic_name=topic_name,
+                subtopic_name=subtopic_name,
+                context_text=context_text,
+                previous_question_texts=previous_question_texts,
+                _depth=_depth + 1,
+            )
+        # Retries exhausted — reduce target count gracefully before giving up
+        for fallback_count in [8, 5, 3]:
+            if len(accepted) >= fallback_count:
+                print(
+                    f"INFO: Limited content — reducing to {fallback_count} questions "
+                    f"for '{subtopic_name}' (had {len(accepted)} unique questions)."
+                )
+                accepted = accepted[:fallback_count]
+                break
+        else:
+            raise ValueError(
+                f"Could not generate at least {MINIMUM_QUESTIONS} unique questions "
+                f"for subtopic '{subtopic_name}'. Only {len(accepted)} could be produced."
+            )
 
     # ── Step 5: Finalise ──────────────────────────────────────────────────
     final = accepted[:QUESTIONS_PER_SUBTOPIC]
