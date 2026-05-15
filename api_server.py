@@ -41,7 +41,7 @@ _patch_typing_extensions_for_pydantic_core()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware  #allows react frontend to talk to the backend without the browser blocking it 
-from pydantic import BaseModel
+from pydantic import BaseModel #Used to define what request/response data should look like (validates structure and types).
 
 import csv
 import json
