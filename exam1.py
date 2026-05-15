@@ -149,6 +149,10 @@ def extract_concept_keywords(question_text: str) -> frozenset[str]:
     return frozenset(t for t in tokens if t not in _STOP_WORDS and len(t) > 2)
 
 
+# Overlap coefficient: divides shared concept words by the SMALLER set size.
+# So it says "every word in the smaller question also appears in the bigger one - they're about the same thing."
+# More sensitive than Jaccard — catches cases where one question is a shorter
+# version of another (e.g. "What is X?" vs "What is X used for in Y context?").
 def concept_overlap(a: str, b: str) -> float:
     """
     Overlap coefficient on content-word sets — more sensitive than Jaccard
