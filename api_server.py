@@ -4,7 +4,10 @@ from pathlib import Path
 import sys
 from typing import Any
 
-
+# Pydantic needs Sentinel and NoExtraItems from typing_extensions, but Anaconda ships
+# an older version and was was missing both of them. The patch just creates them manually. 
+#Pydantic/FastAPI use them internally — your project just ensures they exist so Pydantic doesn't crash on startup. 
+#You never call them directly yourself.
 def _patch_typing_extensions_for_pydantic_core() -> None:
     """Patch Anaconda typing_extensions drift before FastAPI imports Pydantic."""
     try:
