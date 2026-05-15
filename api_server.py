@@ -40,7 +40,7 @@ def _patch_typing_extensions_for_pydantic_core() -> None:
 _patch_typing_extensions_for_pydantic_core()
 
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware  #allows react frontend to talk to the backend without the browser blocking it 
 from pydantic import BaseModel
 
 import csv
