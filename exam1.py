@@ -176,47 +176,60 @@ _EXAM_CONCEPT_OVERLAP = 0.52
 
 
 _READINESS_SKILL_RULES: list[tuple[str, list[str]]] = [
+	# Detects weight/box analogy questions — if already in exam, reject duplicates
     ("HEAVY_BOX_REASONING", [
         r"\b(heavy\s+box|heavier\s+box|boxes)\b",
     ]),
+	# Detects "when is binary search suitable?" questions — only one allowed per exam
+    ("BINARY_SEARCH_SUITABILITY", [
     ("BINARY_SEARCH_SUITABILITY", [
         r"\bbinary search\b.{0,140}\b(sorted|unsorted|suitable|appropriate|choose|select|array|search space)\b",
         r"\b(sorted|unsorted)\b.{0,140}\bbinary search\b",
     ]),
+	# Detects "how many steps does binary search take?" questions — only one allowed per exam
     ("LOGARITHMIC_STEP_COUNT", [
         r"\b(log\s*2|log₂|logarithmic)\b.{0,80}\b(steps?|comparisons?|halvings?|iterations?)\b",
         r"\b(how many|number of)\s+(steps?|comparisons?|halvings?|iterations?)\b",
         r"\b(defective\s+bulb|bulb)\b.{0,120}\b(halv(?:e|ing)|search space|steps?|comparisons?)\b",
     ]),
+	# Detects divide and conquer strategy questions — only one allowed per exam
     ("DIVIDE_AND_CONQUER_STRATEGY", [
         r"\bdivide.and.conquer\b.{0,160}\b(strategy|approach|decompos|subproblem|recursive|split|break|selection|suitable)\b",
     ]),
+	# Detects formal logic questions (modus ponens etc.) — only one allowed per exam
     ("INFERENCE_CHAIN", [
         r"\b(modus ponens|modus tollens|hypothetical syllogism|disjunctive syllogism|affirming the consequent|denying the antecedent)\b",
         r"\b(which inference rule|what conclusion follows|valid conclusion|derive|premises?)\b",
         r"[¬~]?\s*[pqr]\s*(?:→|->|implies)\s*[pqr]",
     ]),
+	# Detects "which algorithm should you use?" questions — only one allowed per exam
     ("ALGORITHM_SELECTION", [
         r"\b(which|select|choose|suitable|appropriate|best)\b.{0,90}\b(algorithm|approach|search|strategy)\b",
         r"\b(binary search|linear search|breadth.first|depth.first|bfs|dfs)\b.{0,120}\b(sorted|unsorted|constraint|scenario|appropriate)\b",
     ]),
+	# Detects time complexity questions about search algorithms — only one allowed per exam
     ("SEARCH_COMPLEXITY", [
         r"\b(worst|best|average).?case\b.{0,80}\b(comparisons?|search|linear|binary|complexity)\b",
         r"\b(complexity|runtime|running time)\b.{0,80}\b(search|algorithm)\b",
     ]),
+	# Detects recursive decomposition questions — only one allowed per exam
     ("DECOMPOSITION", [
         r"\b(decompos|recursive|subproblem|break.*problem)\b",
     ]),
+	# Detects classical programming vs machine learning questions — only one allowed per exam
     ("CLASSICAL_VS_ML", [
         r"\b(machine learning|ml|learns? from examples?|training data|labeled faces?|facial recognition|classification)\b",
         r"\b(classical|rule.based|explicit programming)\b.{0,120}\b(machine learning|examples|training)\b",
     ]),
+	# Detects valid/invalid argument questions — only one allowed per exam
     ("VALID_DEDUCTION", [
         r"\b(sound|valid|invalid)\b.{0,100}\b(argument|deduction|inference|conclusion)\b",
     ]),
+	# Detects tradeoff/comparison questions — only one allowed per exam
     ("TRADEOFF_COMPARISON", [
         r"\b(trade.?off|compare|comparison|prefer|advantage|disadvantage|constraint)\b",
     ]),
+	# Detects "does course X prepare you for course Y?" questions — only one allowed per exam
     ("READINESS_TRANSFER", [
         r"\b(readiness|prepares?|foundation|supports?|enables?)\b.{0,100}\b(target|course|ai|data engineering|machine learning)\b",
     ]),
